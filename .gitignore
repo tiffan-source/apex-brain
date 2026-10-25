@@ -1,0 +1,45 @@
+# Sorties de build
+dist
+tmp
+out-tsc
+coverage
+
+# Dépendances
+node_modules
+
+# Nx
+.nx/cache
+.nx/workspace-data
+.nx/polygraph
+.nx/self-healing
+.nx/migrate-runs
+
+# Vite / Vitest
+vite.config.*.timestamp*
+vitest.config.*.timestamp*
+
+# Éditeurs
+/.idea
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+
+# Secrets locaux
+.env
+.env.*
+!.env.example
+*.service-account.json
+
+# Claude
+.claude/settings.local.json
+.claude/worktrees
+
+# Supabase local
+supabase/.branches
+supabase/.temp
+
+# Système
+.DS_Store
+Thumbs.db
+npm-debug.log
