@@ -1,0 +1,10 @@
+{
+  "name": "ai-assistant",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "workflows/ai-assistant/src",
+  "projectType": "library",
+  "tags": ["type:workflow"],
+  "targets": {
+    "typecheck": {}
+  }
+}
