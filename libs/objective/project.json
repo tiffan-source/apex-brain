@@ -1,0 +1,10 @@
+{
+  "name": "objective",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/objective/src",
+  "projectType": "library",
+  "tags": ["type:domain"],
+  "targets": {
+    "typecheck": {}
+  }
+}
