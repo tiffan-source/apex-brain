@@ -1,0 +1,7 @@
+UPDATE objectives
+SET done = FALSE
+WHERE done IS NULL;
+
+ALTER TABLE objectives
+    ALTER COLUMN done SET DEFAULT FALSE,
+    ALTER COLUMN done SET NOT NULL;
