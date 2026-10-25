@@ -1,0 +1,56 @@
+{
+  "name": "api",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/api/src",
+  "projectType": "application",
+  "tags": ["type:app"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/apps/api"],
+      "cache": true,
+      "inputs": ["production", "^production"],
+      "options": {
+        "cwd": "apps/api",
+        "command": "vite build"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "continuous": true,
+      "options": {
+        "cwd": "apps/api",
+        "parallel": true,
+        "commands": [
+          "vite build --watch --logLevel warn",
+          "node --watch --enable-source-maps --env-file-if-exists=.env ../../dist/apps/api/main.js"
+        ]
+      }
+    },
+    "typecheck": {
+      "options": {
+        "commands": ["tsc -p tsconfig.app.json --noEmit", "tsc -p tsconfig.spec.json --noEmit"]
+      }
+    },
+    "test-integration": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/api",
+        "command": "vitest run test/integration",
+        "env": {
+          "SUPABASE_INTEGRATION": "1"
+        }
+      }
+    },
+    "start": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "continuous": true,
+      "options": {
+        "cwd": "apps/api",
+        "command": "node --enable-source-maps --env-file-if-exists=.env ../../dist/apps/api/main.js"
+      }
+    }
+  }
+}
