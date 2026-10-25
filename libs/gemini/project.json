@@ -1,0 +1,10 @@
+{
+  "name": "gemini",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/gemini/src",
+  "projectType": "library",
+  "tags": ["type:infra"],
+  "targets": {
+    "typecheck": {}
+  }
+}
