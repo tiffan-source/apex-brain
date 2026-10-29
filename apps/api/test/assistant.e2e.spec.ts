@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { AIProviderError } from '@org/ai';
 import { conversationResponseSchema } from '../src/conversation/conversation.schemas';
 import { workflowStateResponseSchema } from '../src/assistant/assistant.schemas';
@@ -133,6 +134,7 @@ describe('Conversation et assistant (e2e)', () => {
   });
 
   it("signale la panne d'Akari dans l'état, et accepte un nouveau message", async () => {
+    const logged = vi.spyOn(Logger.prototype, 'error');
     t.ai.willRespond(new AIProviderError('quota'), t.ai.text('Me revoilà.'));
 
     await send('Bonjour');
@@ -142,6 +144,11 @@ describe('Conversation et assistant (e2e)', () => {
       step: 'SendingPromptToAI',
       at: expect.any(String),
     });
+    // Journalisée en une seule entrée, avec son détail : plus de ligne « undefined » à sa suite.
+    expect(logged).toHaveBeenCalledWith(
+      `Workflow ${objectiveId}: AI_PROVIDER_FAILURE during SendingPromptToAI: quota`,
+    );
+    logged.mockRestore();
 
     await send('Tu es là ?');
     const recovered = await waitFor('ready');

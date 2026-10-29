@@ -115,4 +115,21 @@ describe('GeminiInteractiveAIProvider', () => {
     });
     await expect(failed.generateMessage({ prompt: 'x' })).rejects.toBeInstanceOf(AIProviderError);
   });
+
+  it('nomme les pannes que Gemini a notées sur une interaction échouée', async () => {
+    const failed = new GeminiInteractiveAIProvider(
+      new FakeInteractionsClient(async () => ({
+        id: 'i-6',
+        status: 'failed',
+        errors: [{ code: 'api_error', message: 'Internal error encountered.' }],
+      })),
+      { model: 'gemini-3.8-flash' },
+    );
+
+    await expect(failed.generateMessage({ prompt: 'x' })).rejects.toMatchObject({
+      code: 'AI_PROVIDER_FAILURE',
+      message: 'Gemini interaction i-6 ended with status failed: api_error: Internal error encountered.',
+      metadata: { status: 'failed' },
+    });
+  });
 });

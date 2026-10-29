@@ -191,8 +191,15 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
   devrait les réimplémenter : un cas d'usage `MoveTaskToQuadrant` et la catégorie calculée par le
   serveur les rendraient communs.
 - **Vérifications non faites ici** : l'appel réel à Gemini (pas de clé dans l'environnement de
-  travail ; l'adaptateur est testé avec un client simulé) et Firestore réel (testé avec une
-  doublure qui en reproduit les limites).
+  travail) et Firestore réel (testé avec une doublure qui en reproduit les limites). Le SDK Gemini
+  est vérifié face à un faux serveur HTTP : adresse, clé dans `x-goog-api-key`, lecture des
+  réponses et des refus. En production, les premiers appels (29 octobre 2026) ont été refusés en
+  `401` : Gemini n'accepte pas la clé `GEMINI_API_KEY` configurée sur Render. Une panne de Gemini
+  est désormais journalisée avec son statut HTTP, le code et le message de Gemini (ou
+  « empty response body ») et, pour un refus de la clé, la variable à vérifier.
+- **Interactions conservées par Gemini** : 1 jour sur le palier gratuit, 55 jours sur le palier
+  payant. Une conversation reprise après ce délai envoie un `previous_interaction_id` expiré ;
+  le comportement de Gemini dans ce cas (et la reprise à prévoir) reste à vérifier.
 - **Backlog d'Apex** encore ouvert : laisser filer ou supprimer (objectif, étape, pas), renommer
   les cas d'usage selon le métier (`DefineObjective`…), plusieurs instances du serveur (les
   acteurs XState vivent en mémoire d'un seul processus).

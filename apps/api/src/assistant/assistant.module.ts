@@ -69,8 +69,12 @@ const EVICTION_INTERVAL_MS = 60_000;
           {
             idleTimeoutMs: environment.ASSISTANT_IDLE_TIMEOUT_MINUTES * 60_000,
             logger: {
+              // Une panne de tour arrive sans objet d'erreur (tout est dans le message) : lui passer
+              // `String(undefined)` faisait imprimer une ligne « undefined » à Nest après chaque panne.
               error: (message, error) =>
-                logger.error(message, error instanceof Error ? error.stack : String(error)),
+                error === undefined
+                  ? logger.error(message)
+                  : logger.error(message, error instanceof Error ? error.stack : String(error)),
               warn: (message) => logger.warn(message),
             },
           },

@@ -7,6 +7,7 @@ import {
   InteractionOptions,
   InteractiveAIProvider,
 } from '@org/ai';
+import { translateGeminiError } from './gemini-error.translator';
 import {
   GeminiCreateInteractionParams,
   GeminiInteraction,
@@ -75,12 +76,7 @@ export class GeminiInteractiveAIProvider implements InteractiveAIProvider {
     try {
       interaction = await this.client.create(params);
     } catch (error) {
-      throw new AIProviderError(
-        `Gemini interaction failed: ${error instanceof Error ? error.message : String(error)}`,
-        {
-          status: (error as { status?: unknown }).status,
-        },
-      );
+      throw translateGeminiError(error);
     }
 
     return mapInteraction(interaction);
@@ -99,8 +95,13 @@ function toGeminiTool(tool: AITool) {
 /** Des appels de fonction dans l'interaction : l'IA demande des outils ; sinon, elle répond. */
 export function mapInteraction(interaction: GeminiInteraction): AIInteractionResponse {
   if (interaction.status && FAILED_STATUSES.has(interaction.status)) {
+    const reasons = (interaction.errors ?? [])
+      .map((error) => [error.code, error.message].filter(Boolean).join(': '))
+      .filter(Boolean);
+
     throw new AIProviderError(
-      `Gemini interaction ${interaction.id} ended with status ${interaction.status}`,
+      `Gemini interaction ${interaction.id} ended with status ${interaction.status}` +
+        (reasons.length > 0 ? `: ${reasons.join('; ')}` : ''),
       {
         status: interaction.status,
       },
