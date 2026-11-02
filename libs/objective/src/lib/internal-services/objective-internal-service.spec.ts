@@ -21,6 +21,7 @@ describe('ObjectiveInternalService', () => {
       description: undefined,
       why: 'Pour moi',
       dueDate: undefined,
+      done: true,
       tasks: [],
       subObjectives: [
         {
@@ -29,6 +30,7 @@ describe('ObjectiveInternalService', () => {
           description: undefined,
           why: undefined,
           dueDate: undefined,
+          done: true,
           tasks: [{ id: 't1', title: 'Courir 5 km', importance: 3, urgency: 2, done: true }],
           subObjectives: [],
         },

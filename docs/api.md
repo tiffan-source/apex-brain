@@ -57,7 +57,7 @@ l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt`
 
 | Méthode et route | Cas d'usage | Corps | Réponse |
 |---|---|---|---|
-| `GET /v1/objectives` | `GetAllObjectiveAndTaskQuery` | — | `200 { objectives: ObjectiveOutput[], tasks: TaskOutput[] }` |
+| `GET /v1/objectives` | `GetMyObjectivesUsecase` | — | `200 { objectives: ObjectiveOutput[], tasks: TaskOutput[] }` |
 | `POST /v1/objectives` | `CreateObjectiveUsecase` | `{ title, description?, why?, dueDate? }` | `201 { id, title, description?, why?, dueDate? }` |
 | `PATCH /v1/objectives/{objectiveId}` | `EditObjectiveUsecase` | `{ title, description?, why?, dueDate? }` | `200` (même forme) |
 | `POST /v1/objectives/{objectiveId}/sub-objectives` | `AddSubObjectiveUsecase` | `{ title }` | `201 { id, title }` |
@@ -66,9 +66,15 @@ l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt`
 | `PUT /v1/tasks/{taskId}/done` | `UpdateDoneStatusOfTaskUsecase` | `{ done }` | `200 { id, title, done }` |
 | `GET /v1/tasks/today-focus` | `WhatIsTodayFocusUsecase` | — | `200 [{ id, title, objectiveId, important, urgent, dueDate?, done }]` |
 
-- `ObjectiveOutput` : `{ id, title, description, why, dueDate | null, parentObjective | null }` ;
-  `TaskOutput` : `{ id, title, importance, urgency, done, objectiveId }`. L'ordre est stable :
-  création, puis id.
+- `ObjectiveOutput` : `{ id, title, description, why, dueDate | null, parentObjective | null, done }` ;
+  `TaskOutput` : `{ id, title, importance, urgency, done, objectiveId }`.
+- `done` d'un objectif ou d'une étape : fait ou non fait, rien d'autre. Il vaut `true` quand il a au
+  moins un pas et que tous sont faits, ceux de ses sous-objectifs compris. C'est le serveur qui
+  le décide : les clients l'affichent sans le calculer, et relisent `GET /v1/objectives` après une
+  écriture qui peut le changer (cocher, ajouter ou déplacer un pas).
+- Les étapes d'un objectif n'ont aucun ordre, les pas d'une étape non plus : ils sont indépendants,
+  aucun n'en attend un autre. Les listes restent triées par création, puis par id, pour que
+  l'affichage ne saute pas d'une lecture à l'autre : ce tri ne porte aucun sens.
 - `PATCH /v1/objectives/{id}` : un champ absent reste inchangé ; `dueDate: null` retire l'échéance.
   Vaut pour un objectif comme pour une étape.
 - `PATCH /v1/tasks/{id}` : changer `objectiveId` déplace le pas (vers une étape, un objectif,

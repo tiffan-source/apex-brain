@@ -6,6 +6,8 @@ import {
   CreateObjectiveUsecase,
   EditMyTaskUsecase,
   EditObjectiveUsecase,
+  GetAllObjectiveAndTaskQuery,
+  GetMyObjectivesUsecase,
   ObjectiveInternalService,
   ObjectiveRepository,
   TaskRepository,
@@ -19,6 +21,11 @@ import { TasksController } from './tasks.controller';
 @Module({
   controllers: [ObjectivesController, TasksController],
   providers: [
+    {
+      provide: GetMyObjectivesUsecase,
+      useFactory: (query: GetAllObjectiveAndTaskQuery) => new GetMyObjectivesUsecase(query),
+      inject: [GetAllObjectiveAndTaskQuery],
+    },
     {
       provide: CreateObjectiveUsecase,
       useFactory: (repository: ObjectiveRepository, ids: IdGenerator) =>

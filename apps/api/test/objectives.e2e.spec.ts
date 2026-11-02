@@ -55,6 +55,7 @@ describe('Objectifs (e2e)', () => {
           why: 'Me prouver que je peux',
           dueDate: '2027-04-01T00:00:00.000Z',
           parentObjective: null,
+          done: false,
         },
       ],
       tasks: [],

@@ -1,6 +1,15 @@
 import { Task } from './task';
 import { TodoBase } from './todo-base';
 
+/**
+ * Un objectif ou une étape est fait, ou non fait : rien d'autre. Il est fait quand il a au moins un pas et que
+ * tous sont faits, sous-étapes comprises. Les étapes n'ont aucun ordre entre elles, les pas non plus : aucune
+ * n'en attend une autre.
+ */
+export function allTasksDone(tasks: readonly { done: boolean }[]): boolean {
+  return tasks.length > 0 && tasks.every((task) => task.done);
+}
+
 export class Objective extends TodoBase {
   private _why?: string;
   private _tasks: Task[] = [];
@@ -50,6 +59,11 @@ export class Objective extends TodoBase {
 
   get subObjectives(): Objective[] {
     return this._subObjectives;
+  }
+
+  /** Ses pas et ceux de ses sous-objectifs, à toute profondeur. */
+  get allTasks(): Task[] {
+    return [...this._tasks, ...this._subObjectives.flatMap((subObjective) => subObjective.allTasks)];
   }
 
   addSubObjective(subObjective: Objective): void {

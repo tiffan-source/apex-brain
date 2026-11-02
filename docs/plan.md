@@ -54,7 +54,7 @@ restent internes.
 | `RefreshSessionUseCase` *(nouveau)* | cas d'usage | `POST /v1/auth/refresh` |
 | `LogUserOutUseCase` *(nouveau)* | cas d'usage | `POST /v1/auth/logout` |
 | `GetCurrentUserUseCase` | cas d'usage | `GET /v1/auth/me` |
-| `GetAllObjectiveAndTaskQuery` | query | `GET /v1/objectives` |
+| `GetMyObjectivesUsecase` *(nouveau)*, sur `GetAllObjectiveAndTaskQuery` | cas d'usage | `GET /v1/objectives` |
 | `CreateObjectiveUsecase` | cas d'usage | `POST /v1/objectives` |
 | `EditObjectiveUsecase` | cas d'usage | `PATCH /v1/objectives/{objectiveId}` |
 | `AddSubObjectiveUsecase` | cas d'usage | `POST /v1/objectives/{objectiveId}/sub-objectives` |
@@ -186,10 +186,13 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Base de données** : lancer Supabase depuis `apex-brain` et retirer `supabase/` d'Apex une
   fois le client migré ; verrouiller les règles Firestore (le navigateur n'y écrit plus).
 - **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE.
+- **Étapes et pas sans ordre** : ils sont indépendants, aucun n'en attend un autre. Une étape est
+  faite ou non faite, rien d'autre : `done` dans `GET /v1/objectives` (`GetMyObjectivesUsecase`),
+  et les clients l'affichent sans le calculer. Il vaut `true` avec au moins un pas, tous faits ; la
+  colonne `objectives.done` n'est toujours pas lue. Akari le sait (instructions, `getObjectiveTree`).
 - **Règles métier encore dans le client** : la catégorie d'Eisenhower (`apex-library`) et
-  `levelsForQuadrant` (déplacer un pas dans la matrice) vivent dans le client web. Le mobile
-  devrait les réimplémenter : un cas d'usage `MoveTaskToQuadrant` et la catégorie calculée par le
-  serveur les rendraient communs.
+  `levelsForQuadrant` (déplacer un pas dans la matrice) vivent dans les clients web et mobile. Un
+  cas d'usage `MoveTaskToQuadrant` et la catégorie calculée par le serveur les rendraient communs.
 - **Vérifications non faites ici** : l'appel réel à Gemini (pas de clé dans l'environnement de
   travail) et Firestore réel (testé avec une doublure qui en reproduit les limites). Le SDK Gemini
   est vérifié face à un faux serveur HTTP : adresse, clé dans `x-goog-api-key`, lecture des

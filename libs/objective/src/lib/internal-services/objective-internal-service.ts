@@ -1,5 +1,5 @@
 import { IdGenerator } from '@org/chore';
-import { Objective } from '../models/objective';
+import { Objective, allTasksDone } from '../models/objective';
 import { Task } from '../models/task';
 import { ObjectiveRepository } from '../protocols/objective.repository';
 
@@ -17,7 +17,11 @@ export type ObjectiveTreeOutput = {
   description?: string;
   why?: string;
   dueDate?: Date | null;
+  /** Au moins un pas, et tous faits, ceux de ses sous-objectifs compris. */
+  done: boolean;
+  /** Sans ordre : les pas sont indépendants les uns des autres. */
   tasks: ObjectiveTreeTaskOutput[];
+  /** Sans ordre : les étapes sont indépendantes les unes des autres. */
   subObjectives: ObjectiveTreeOutput[];
 };
 
@@ -136,6 +140,7 @@ export class ObjectiveInternalService {
       description: objective.description,
       why: objective.why,
       dueDate: objective.dueDate,
+      done: allTasksDone(objective.allTasks),
       tasks: objective.tasks.map((task) => ({
         id: task.id,
         title: task.title,

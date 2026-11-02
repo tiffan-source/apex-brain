@@ -6,7 +6,7 @@ import {
   AddTaskToObjectiveUsecase,
   CreateObjectiveUsecase,
   EditObjectiveUsecase,
-  GetAllObjectiveAndTaskQuery,
+  GetMyObjectivesUsecase,
 } from '@org/objective';
 import { CurrentUser } from '../auth/auth.decorators';
 import { openApiErrorSchema, openApiSchema } from '../http/openapi';
@@ -34,19 +34,18 @@ import {
 @Controller('objectives')
 export class ObjectivesController {
   constructor(
-    @Inject(GetAllObjectiveAndTaskQuery)
-    private readonly getAllObjectivesAndTasks: GetAllObjectiveAndTaskQuery,
+    @Inject(GetMyObjectivesUsecase) private readonly getMyObjectives: GetMyObjectivesUsecase,
     @Inject(CreateObjectiveUsecase) private readonly createObjective: CreateObjectiveUsecase,
     @Inject(EditObjectiveUsecase) private readonly editObjective: EditObjectiveUsecase,
     @Inject(AddSubObjectiveUsecase) private readonly addSubObjective: AddSubObjectiveUsecase,
     @Inject(AddTaskToObjectiveUsecase) private readonly addTaskToObjective: AddTaskToObjectiveUsecase,
   ) {}
 
-  /** GetAllObjectiveAndTaskQuery : tous les objectifs, étapes et pas de la personne, à plat. */
+  /** GetMyObjectivesUsecase : tous les objectifs, étapes et pas de la personne, à plat, chacun fait ou non fait. */
   @Get()
   @ApiResponse({ status: 200, schema: openApiSchema(objectivesResponseSchema) })
-  list(@CurrentUser() user: AuthenticatedUserOutput) {
-    return this.getAllObjectivesAndTasks.execute({ ownerId: user.id });
+  async list(@CurrentUser() user: AuthenticatedUserOutput) {
+    return unwrap(await this.getMyObjectives.execute({ ownerId: user.id }));
   }
 
   /** CreateObjectiveUsecase */
