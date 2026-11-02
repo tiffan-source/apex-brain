@@ -191,4 +191,63 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
     expect((await http().get('/v1/auth/me').set('Authorization', renewed)).body.email).toBe(alice.email);
     expect((await http().post('/v1/auth/logout').set('Authorization', renewed)).status).toBe(204);
   });
+
+  it('supprime un pas, une étape puis un objectif et sa conversation, au nom de sa propriétaire seulement', async () => {
+    const alice = await register('alice');
+    const mallory = await register('mallory');
+    const as = (who: { authorization: string }) => ({ Authorization: who.authorization });
+    const titles = async () => {
+      const { objectives, tasks } = (await http().get('/v1/objectives').set(as(alice))).body;
+      return [...objectives, ...tasks].map((row: { title: string }) => row.title);
+    };
+
+    const objectiveId = (await http().post('/v1/objectives').set(as(alice)).send({ title: 'Objectif' })).body
+      .id as string;
+    const stage = await http()
+      .post(`/v1/objectives/${objectiveId}/sub-objectives`)
+      .set(as(alice))
+      .send({ title: 'Étape' });
+    const addTask = (holderId: string, title: string) =>
+      http()
+        .post(`/v1/objectives/${holderId}/tasks`)
+        .set(as(alice))
+        .send({ title, importance: 3, urgency: 3 });
+    const first = await addTask(stage.body.id, 'Premier pas');
+    await addTask(stage.body.id, 'Deuxième pas');
+    await addTask(objectiveId, 'Pas sur l’objectif');
+
+    ai.willRespond(ai.text('Bonjour.'));
+    await http()
+      .post(`/v1/objectives/${objectiveId}/assistant/messages`)
+      .set(as(alice))
+      .send({ message: 'Salut' });
+    await waitForStatus(objectiveId, alice.authorization, 'ready');
+
+    // Rien ne bouge au nom de quelqu'un d'autre
+    expect((await http().delete(`/v1/tasks/${first.body.id}`).set(as(mallory))).status).toBe(404);
+    expect((await http().delete(`/v1/objectives/${stage.body.id}`).set(as(mallory))).status).toBe(404);
+    expect((await http().delete(`/v1/objectives/${objectiveId}`).set(as(mallory))).status).toBe(404);
+    await expect(titles()).resolves.toEqual([
+      'Objectif',
+      'Étape',
+      'Premier pas',
+      'Deuxième pas',
+      'Pas sur l’objectif',
+    ]);
+
+    // Un pas, puis une étape et ce qu'elle porte
+    expect((await http().delete(`/v1/tasks/${first.body.id}`).set(as(alice))).status).toBe(204);
+    await expect(titles()).resolves.toEqual(['Objectif', 'Étape', 'Deuxième pas', 'Pas sur l’objectif']);
+
+    expect((await http().delete(`/v1/objectives/${stage.body.id}`).set(as(alice))).status).toBe(204);
+    await expect(titles()).resolves.toEqual(['Objectif', 'Pas sur l’objectif']);
+    expect((await http().get(`/v1/objectives/${objectiveId}/conversation`).set(as(alice))).status).toBe(200);
+
+    // L'objectif, sa conversation et son assistant
+    expect((await http().delete(`/v1/objectives/${objectiveId}`).set(as(alice))).status).toBe(204);
+    await expect(titles()).resolves.toEqual([]);
+    expect((await http().get(`/v1/objectives/${objectiveId}/conversation`).set(as(alice))).status).toBe(404);
+    expect((await http().get(`/v1/objectives/${objectiveId}/assistant`).set(as(alice))).status).toBe(404);
+    expect((await http().delete(`/v1/objectives/${objectiveId}`).set(as(alice))).status).toBe(404);
+  });
 });

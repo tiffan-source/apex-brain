@@ -18,4 +18,11 @@ export abstract class ObjectiveRepository {
 
   /** Charger l'objectif (ou l'étape) qui porte ce pas, avec ses pas directs. */
   abstract findObjectiveWithASpecificTaskId(taskId: string, ownerId: string): Promise<Objective | null>;
+
+  /**
+   * Supprimer l'objectif ou l'étape avec tout ce qui en dépend : ses étapes, leurs pas et, pour un
+   * objectif principal, sa conversation.
+   * Rend `false` si rien n'a été supprimé (introuvable pour ce propriétaire) ; une panne lève une erreur.
+   */
+  abstract delete(id: string, ownerId: string): Promise<boolean>;
 }

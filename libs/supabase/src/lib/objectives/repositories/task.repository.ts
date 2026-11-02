@@ -55,4 +55,19 @@ export class SupabaseTaskRepository implements TaskRepository {
 
     return (data?.length ?? 0) === 1;
   }
+
+  async delete(taskId: string, ownerId: string): Promise<boolean> {
+    const { data, error } = await this.db
+      .from('tasks')
+      .delete()
+      .eq('id', taskId)
+      .eq('user_id', ownerId)
+      .select('id');
+
+    if (error) {
+      throw new Error(`Erreur suppression tâche: ${error.message}`);
+    }
+
+    return (data?.length ?? 0) === 1;
+  }
 }

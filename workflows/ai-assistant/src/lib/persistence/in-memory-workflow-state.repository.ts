@@ -21,6 +21,10 @@ export class InMemoryWorkflowStateRepository extends IWorkflowStateRepository {
     return stored ? (JSON.parse(stored) as WorkflowState) : null;
   }
 
+  async delete(id: string): Promise<void> {
+    this.states.delete(id);
+  }
+
   /** Remplacer un état tel quel (pour simuler un document écrit par une autre version). */
   async overwrite(state: WorkflowState): Promise<void> {
     this.states.set(state.id, JSON.stringify(state));

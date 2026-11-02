@@ -87,4 +87,6 @@ export type WorkflowState = {
 export abstract class IWorkflowStateRepository {
   abstract save(state: WorkflowState): Promise<void>;
   abstract findById(id: string): Promise<WorkflowState | null>;
+  /** Sans effet si ce workflow n'a pas d'état persisté. */
+  abstract delete(id: string): Promise<void>;
 }

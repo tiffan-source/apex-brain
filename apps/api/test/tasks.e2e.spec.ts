@@ -83,6 +83,33 @@ describe('Pas (e2e)', () => {
     expect(t.objectives.db.tasks.get('t2')).toMatchObject({ objectiveId: 's1', done: true });
   });
 
+  it('supprime un pas sans toucher à ses voisins, puis répond 404 (DeleteTask)', async () => {
+    const remove = () => t.http().delete('/v1/tasks/t1').set('Authorization', alice.authorization);
+
+    const response = await remove();
+
+    expect(response.status).toBe(204);
+    expect(response.body).toEqual({});
+    expect([...t.objectives.db.tasks.keys()]).toEqual(['t2']);
+    expect(t.objectives.db.objectives.has('s1')).toBe(true);
+
+    const again = await remove();
+    expect(again.status).toBe(404);
+    expect(again.body.error.code).toBe('TASK_NOT_FOUND');
+  });
+
+  it('répond 500 sans détail technique quand la base est en panne', async () => {
+    t.objectives.db.failWrites = true;
+
+    const response = await t.http().delete('/v1/tasks/t1').set('Authorization', alice.authorization);
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({
+      error: { code: 'UNKNOWN_ERROR', message: 'An unexpected error occurred' },
+    });
+    expect(t.objectives.db.tasks.has('t1')).toBe(true);
+  });
+
   it('donne les pas du jour (WhatIsTodayFocus)', async () => {
     const response = await t.http().get('/v1/tasks/today-focus').set('Authorization', alice.authorization);
 
@@ -114,6 +141,10 @@ describe('Pas (e2e)', () => {
       .send({ title: 'Courir 5 km', objectiveId: 'm1', importance: 3, urgency: 2 });
     expect(moveAway.status).toBe(404);
     expect(moveAway.body.error.code).toBe('OBJECTIVE_NOT_FOUND');
+
+    const remove = await t.http().delete('/v1/tasks/t1').set('Authorization', mallory.authorization);
+    expect(remove.status).toBe(404);
+    expect(remove.body.error.code).toBe('TASK_NOT_FOUND');
 
     const focus = await t.http().get('/v1/tasks/today-focus').set('Authorization', mallory.authorization);
     expect(focus.body).toEqual([]);

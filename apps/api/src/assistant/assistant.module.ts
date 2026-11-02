@@ -17,10 +17,9 @@ import {
 } from '@org/ai-assistant';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { IdGenerator } from '@org/chore';
-import { ObjectiveInternalService } from '@org/objective';
+import { ObjectiveInternalService, ObjectiveRepository } from '@org/objective';
 import type { Environment } from '../config/environment';
 import { APP_ENVIRONMENT } from '../config/environment';
-import { ObjectivesModule } from '../objectives/objectives.module';
 import { AssistantController } from './assistant.controller';
 
 /** Toutes les minutes, les workflows au repos depuis trop longtemps quittent la mémoire. */
@@ -28,9 +27,14 @@ const EVICTION_INTERVAL_MS = 60_000;
 
 /** L'assistant : l'orchestrateur XState et ses acteurs, assemblés sur les ports. */
 @Module({
-  imports: [ObjectivesModule],
   controllers: [AssistantController],
   providers: [
+    {
+      provide: ObjectiveInternalService,
+      useFactory: (repository: ObjectiveRepository, ids: IdGenerator) =>
+        new ObjectiveInternalService(repository, ids),
+      inject: [ObjectiveRepository, IdGenerator],
+    },
     { provide: SystemContextProvider, useFactory: () => new AkariSystemContextProvider() },
     {
       provide: ToolRegistry,

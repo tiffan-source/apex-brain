@@ -111,6 +111,58 @@ describe.skipIf(!integrationEnabled)('Supabase — objectifs et pas (intégratio
     await expect(tasks.findById(done.id, alice)).resolves.toMatchObject({ done: false });
   });
 
+  it('supprime un objectif avec son sous-arbre, au nom de sa propriétaire seulement', async () => {
+    const { root, stage, done, todo } = await seedTree();
+    const subStage = new Objective(testId('s'), 'Sous-étape');
+    const reloadedStage = (await objectives.findById(stage.id, alice)) as Objective;
+    reloadedStage.addSubObjective(subStage);
+    subStage.addTask(new Task(testId('t'), 'Au fond', 1, 1));
+    expect(await objectives.save(reloadedStage, alice)).toBe(true);
+
+    await expect(objectives.delete(root.id, mallory)).resolves.toBe(false);
+    await expect(objectives.delete(stage.id, mallory)).resolves.toBe(false);
+    await expect(objectives.findById(root.id, alice)).resolves.toMatchObject({ id: root.id });
+
+    await expect(objectives.delete(root.id, alice)).resolves.toBe(true);
+
+    await expect(objectives.findById(root.id, alice)).resolves.toBeNull();
+    await expect(objectives.findById(stage.id, alice)).resolves.toBeNull();
+    await expect(objectives.findById(subStage.id, alice)).resolves.toBeNull();
+    await expect(tasks.findById(done.id, alice)).resolves.toBeNull();
+    await expect(tasks.findById(todo.id, alice)).resolves.toBeNull();
+    await expect(tasks.findById(subStage.tasks[0].id, alice)).resolves.toBeNull();
+    await expect(objectives.delete(root.id, alice)).resolves.toBe(false);
+  });
+
+  it('supprime une étape sans toucher à son objectif', async () => {
+    const { root, stage, done } = await seedTree();
+    const direct = new Task(testId('t'), 'Sur l’objectif', 1, 1);
+    const reloadedRoot = (await objectives.findById(root.id, alice)) as Objective;
+    reloadedRoot.addTask(direct);
+    expect(await objectives.save(reloadedRoot, alice)).toBe(true);
+
+    await expect(objectives.delete(stage.id, alice)).resolves.toBe(true);
+
+    const remaining = await objectives.findById(root.id, alice);
+    expect(remaining?.subObjectives).toEqual([]);
+    expect(remaining?.tasks.map((task) => task.id)).toEqual([direct.id]);
+    await expect(tasks.findById(done.id, alice)).resolves.toBeNull();
+  });
+
+  it('supprime un pas au nom de sa propriétaire seulement, sans toucher à ses voisins', async () => {
+    const { stage, done, todo } = await seedTree();
+
+    await expect(tasks.delete(todo.id, mallory)).resolves.toBe(false);
+    await expect(tasks.findById(todo.id, alice)).resolves.not.toBeNull();
+
+    await expect(tasks.delete(todo.id, alice)).resolves.toBe(true);
+
+    await expect(tasks.findById(todo.id, alice)).resolves.toBeNull();
+    await expect(tasks.findById(done.id, alice)).resolves.not.toBeNull();
+    await expect(objectives.findById(stage.id, alice)).resolves.not.toBeNull();
+    await expect(tasks.delete(todo.id, alice)).resolves.toBe(false);
+  });
+
   it('charge tout ce qui appartient à la personne, et seulement cela, dans un ordre stable', async () => {
     const { root, stage, done, todo } = await seedTree();
     const malloryObjective = new Objective(testId('o'), 'Objectif de Mallory');
