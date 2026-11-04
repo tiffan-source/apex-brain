@@ -64,6 +64,8 @@ l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt`
 | `POST /v1/objectives/{objectiveId}/tasks` | `AddTaskToObjectiveUsecase` | `{ title, importance, urgency }` | `201 { id, title, importance, urgency }` |
 | `PATCH /v1/tasks/{taskId}` | `EditMyTaskUsecase` | `{ title, objectiveId, importance, urgency }` | `200 { id, title, objectiveId, importance, urgency }` |
 | `PUT /v1/tasks/{taskId}/done` | `UpdateDoneStatusOfTaskUsecase` | `{ done }` | `200 { id, title, done }` |
+| `DELETE /v1/objectives/{objectiveId}` | `DeleteObjectiveUsecase` | — | `204` |
+| `DELETE /v1/tasks/{taskId}` | `DeleteTaskUsecase` | — | `204` |
 | `GET /v1/tasks/today-focus` | `WhatIsTodayFocusUsecase` | — | `200 [{ id, title, objectiveId, important, urgent, dueDate?, done }]` |
 
 - `ObjectiveOutput` : `{ id, title, description, why, dueDate | null, parentObjective | null }` ;
@@ -73,6 +75,12 @@ l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt`
   Vaut pour un objectif comme pour une étape.
 - `PATCH /v1/tasks/{id}` : changer `objectiveId` déplace le pas (vers une étape, un objectif,
   un ancêtre).
+- `DELETE /v1/objectives/{id}` : vaut pour un objectif comme pour une étape, et emporte tout ce qui
+  en dépend : ses étapes, leurs pas et, pour un objectif principal, sa conversation, ses messages
+  et son assistant (arrêté même en plein tour). Supprimer une étape ne touche ni à son objectif, ni
+  à sa conversation. La suppression est définitive : il n'y a pas de corbeille.
+- Supprimer un élément déjà supprimé (double appui, nouvel essai après une coupure) répond `404` :
+  le client peut le traiter comme un succès.
 - `importance` et `urgency` vont de 1 à 5 (à partir de 3 : important, urgent).
 
 ## Conversation et assistant
@@ -84,7 +92,8 @@ l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt`
 | `POST /v1/objectives/{objectiveId}/assistant/messages` | `sendMessage` | `{ message }` | `202 WorkflowState` |
 | `POST /v1/objectives/{objectiveId}/assistant/permission` | `respondToPermission` | `{ granted, toolCallId? }` | `202 WorkflowState` |
 
-Seul un objectif principal a une conversation (une étape répond `404 CONVERSATION_NOT_FOUND`).
+Seul un objectif principal a une conversation (une étape, ou un objectif supprimé, répond
+`404 CONVERSATION_NOT_FOUND`).
 `sender` vaut l'id de la personne, ou `AI` pour Akari.
 
 ```text

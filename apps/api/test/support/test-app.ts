@@ -51,6 +51,8 @@ export async function createTestApp(environmentOverrides: Record<string, string>
   objectives.db.onObjectiveCreated((row) => {
     if (!row.parentId) chat.db.createConversation(row.id, row.ownerId);
   });
+  // Comme la cascade de la base : la conversation disparaît avec son objectif.
+  objectives.db.onObjectiveDeleted((row) => chat.db.deleteConversation(row.id));
 
   const adapters: DynamicModule = {
     module: InMemoryAdaptersModule,

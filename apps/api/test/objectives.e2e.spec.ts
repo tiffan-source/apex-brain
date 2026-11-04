@@ -4,6 +4,7 @@ import {
   subObjectiveResponseSchema,
   createdTaskResponseSchema,
 } from '../src/objectives/objectives.schemas';
+import { seedObjective, seedTask } from '@org/objective/testing';
 import type { TestApp } from './support/test-app';
 import { createTestApp } from './support/test-app';
 
@@ -123,6 +124,87 @@ describe('Objectifs (e2e)', () => {
         objectiveId: stageId,
       },
     ]);
+  });
+
+  describe('suppression (DeleteObjective)', () => {
+    /** Alice : `o1` avec les étapes `s1` (qui porte `s2`) et `s3`, et un autre objectif `o2`. */
+    const seedTree = () => {
+      const { db } = t.objectives;
+      seedObjective(db, { id: 'o1', ownerId: alice.id });
+      seedObjective(db, { id: 's1', ownerId: alice.id, parentId: 'o1' });
+      seedObjective(db, { id: 's2', ownerId: alice.id, parentId: 's1' });
+      seedObjective(db, { id: 's3', ownerId: alice.id, parentId: 'o1' });
+      seedObjective(db, { id: 'o2', ownerId: alice.id });
+      seedTask(db, { id: 't1', ownerId: alice.id, objectiveId: 's1' });
+      seedTask(db, { id: 't2', ownerId: alice.id, objectiveId: 's2' });
+      seedTask(db, { id: 't3', ownerId: alice.id, objectiveId: 's3' });
+      seedTask(db, { id: 't4', ownerId: alice.id, objectiveId: 'o2' });
+    };
+
+    const remove = (id: string, who = alice) =>
+      t.http().delete(`/v1/objectives/${id}`).set('Authorization', who.authorization);
+
+    const list = async (who = alice) => {
+      const response = await t.http().get('/v1/objectives').set('Authorization', who.authorization);
+      const { objectives, tasks } = objectivesResponseSchema.parse(response.body);
+      return { objectives: objectives.map((row) => row.id), tasks: tasks.map((row) => row.id) };
+    };
+
+    it('supprime un objectif avec ses étapes et leurs pas, sans toucher au reste', async () => {
+      seedTree();
+
+      const response = await remove('o1');
+
+      expect(response.status).toBe(204);
+      expect(response.body).toEqual({});
+      await expect(list()).resolves.toEqual({ objectives: ['o2'], tasks: ['t4'] });
+    });
+
+    it("supprime une étape avec ce qu'elle porte, sans toucher à son objectif ni à ses voisines", async () => {
+      seedTree();
+
+      expect((await remove('s1')).status).toBe(204);
+
+      await expect(list()).resolves.toEqual({ objectives: ['o1', 's3', 'o2'], tasks: ['t3', 't4'] });
+    });
+
+    it('répond 404 pour un objectif inconnu ou déjà supprimé', async () => {
+      seedTree();
+      expect((await remove('o1')).status).toBe(204);
+
+      for (const id of ['o1', 's1', 'inconnu']) {
+        const response = await remove(id);
+        expect(response.status).toBe(404);
+        expect(response.body.error.code).toBe('OBJECTIVE_NOT_FOUND');
+      }
+    });
+
+    it("demande un jeton et ne supprime rien pour quelqu'un d'autre", async () => {
+      seedTree();
+
+      expect((await t.http().delete('/v1/objectives/o1')).status).toBe(401);
+      const stolen = await remove('o1', mallory);
+
+      expect(stolen.status).toBe(404);
+      expect(stolen.body.error.code).toBe('OBJECTIVE_NOT_FOUND');
+      await expect(list()).resolves.toEqual({
+        objectives: ['o1', 's1', 's2', 's3', 'o2'],
+        tasks: ['t1', 't2', 't3', 't4'],
+      });
+    });
+
+    it('répond 500 sans détail technique quand la base est en panne', async () => {
+      seedTree();
+      t.objectives.db.failWrites = true;
+
+      const response = await remove('o1');
+
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({
+        error: { code: 'UNKNOWN_ERROR', message: 'An unexpected error occurred' },
+      });
+      expect(t.objectives.db.objectives.has('o1')).toBe(true);
+    });
   });
 
   it('valide les corps de requête', async () => {

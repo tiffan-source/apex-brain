@@ -52,6 +52,10 @@ describe('Plateforme HTTP (e2e)', () => {
       'id',
     );
     expect(document.components.securitySchemes).toHaveProperty('bearer');
+
+    for (const path of ['/v1/objectives/{objectiveId}', '/v1/tasks/{taskId}']) {
+      expect(Object.keys(document.paths[path].delete.responses)).toEqual(['204', '404']);
+    }
   });
 
   it('sert la page /docs', async () => {
@@ -127,6 +131,13 @@ describe('Plateforme HTTP (e2e)', () => {
     expect(response.headers['access-control-allow-origin']).toBe('http://localhost:4200');
     expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.headers['x-powered-by']).toBeUndefined();
+
+    const deletion = await t
+      .http()
+      .options('/v1/tasks/t1')
+      .set('Origin', 'http://localhost:4200')
+      .set('Access-Control-Request-Method', 'DELETE');
+    expect(deletion.headers['access-control-allow-methods']).toContain('DELETE');
 
     const foreign = await t
       .http()

@@ -16,6 +16,7 @@ class FakeFirestore implements DocumentStore {
           const data = this.documents.get(`${name}/${id}`);
           return { exists: data !== undefined, data: () => (data ? structuredClone(data) : undefined) };
         },
+        delete: async () => this.documents.delete(`${name}/${id}`),
       }),
     };
   }
@@ -91,6 +92,17 @@ describe('FirebaseWorkflowStateRepository', () => {
 
     await repository.save(state({ value: WORKFLOW_READY_FOR_NEW_MESSAGE }));
     expect(firestore.documents.get('workflow-states/o1')).not.toHaveProperty('context');
+  });
+
+  it("supprime l'état d'un workflow, et accepte un workflow qui n'en a pas", async () => {
+    const firestore = new FakeFirestore();
+    const repository = new FirebaseWorkflowStateRepository({ db: firestore });
+    await repository.save(state());
+
+    await repository.delete('o1');
+
+    await expect(repository.findById('o1')).resolves.toBeNull();
+    await expect(repository.delete('inconnu')).resolves.toBeUndefined();
   });
 
   it('rend null pour un workflow inconnu', async () => {

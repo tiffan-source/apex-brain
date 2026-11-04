@@ -2,6 +2,8 @@ export * from './lib/usecases/add-sub-objective.usecase';
 export * from './lib/usecases/add-task-to-objective.usecase';
 export * from './lib/usecases/update-done-status-of-task.usecase';
 export * from './lib/usecases/create-objective.usecase';
+export * from './lib/usecases/delete-objective.usecase';
+export * from './lib/usecases/delete-task.usecase';
 export * from './lib/usecases/edit-my-objective.usecase';
 export * from './lib/usecases/edit-my-task.usecase';
 export * from './lib/usecases/what-is-today-focus.usecase';

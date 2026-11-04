@@ -31,6 +31,18 @@ export class InMemoryChatDatabase {
     return id;
   }
 
+  /** Comme `ON DELETE CASCADE` : la conversation de cet objectif disparaît avec ses messages. */
+  deleteConversation(externalReferenceId: string): void {
+    for (const conversation of [...this.conversations.values()]) {
+      if (conversation.externalReferenceId !== externalReferenceId) continue;
+
+      this.conversations.delete(conversation.id);
+      for (const message of [...this.messages.values()]) {
+        if (message.conversationId === conversation.id) this.messages.delete(message.id);
+      }
+    }
+  }
+
   /** Une horloge qui avance d'une seconde à chaque message : l'ordre est stable. */
   now(): Date {
     this.clock += 1000;

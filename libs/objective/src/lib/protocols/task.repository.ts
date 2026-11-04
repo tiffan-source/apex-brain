@@ -9,6 +9,9 @@ export abstract class TaskRepository {
   /** Rend `false` si l'enregistrement n'a pas abouti (dont : pas introuvable pour ce propriétaire). */
   abstract update(task: Task, ownerId: string): Promise<boolean>;
 
+  /** Rend `false` si rien n'a été supprimé (introuvable pour ce propriétaire) ; une panne lève une erreur. */
+  abstract delete(taskId: string, ownerId: string): Promise<boolean>;
+
   /** Tous les pas de la personne, avec leur `objectiveId`. */
   abstract getAllUserTasks(userId: string): Promise<Task[]>;
 }

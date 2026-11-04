@@ -1,4 +1,4 @@
-import { AIProviderError } from '@org/ai';
+import { AIInteractionResponse, AIProviderError } from '@org/ai';
 import { createWorkflowHarness, silentLogger, waitForStatus } from '../testing/workflow.harness';
 import {
   AI_SENDER_ID,
@@ -528,6 +528,97 @@ describe('SendMessageToAIWorkflow', () => {
         data: { lastRegisteredMessage: { content: 'Avant la pause.' } },
       });
       expect(workflow.activeWorkflowCount).toBe(1);
+    });
+  });
+
+  describe("la suppression de l'objectif", () => {
+    it("oublie le workflow : plus d'acteur, plus d'état persisté, plus d'accès", async () => {
+      const { workflow, ai, chat, workflowStateRepository } = createWorkflowHarness();
+      ai.willRespond(ai.text('Bonjour.'));
+      await workflow.sendMessage('o1', 'alice', 'Salut');
+      await waitForStatus(workflow, 'ready');
+      await expect(workflowStateRepository.findById('o1')).resolves.not.toBeNull();
+
+      chat.db.deleteConversation('o1');
+      await workflow.forget('o1');
+
+      expect(workflow.activeWorkflowCount).toBe(0);
+      await expect(workflowStateRepository.findById('o1')).resolves.toBeNull();
+      await expect(workflow.getState('o1', 'alice')).resolves.toMatchObject({
+        success: false,
+        error: { code: 'CONVERSATION_NOT_FOUND' },
+      });
+    });
+
+    it("oublie aussi un workflow qui n'est plus en mémoire", async () => {
+      const { workflow, ai, workflowStateRepository } = createWorkflowHarness();
+      ai.willRespond(ai.text('Bonjour.'));
+      await workflow.sendMessage('o1', 'alice', 'Salut');
+      await waitForStatus(workflow, 'ready');
+      await workflow.shutdown();
+      await expect(workflowStateRepository.findById('o1')).resolves.not.toBeNull();
+
+      await workflow.forget('o1');
+
+      await expect(workflowStateRepository.findById('o1')).resolves.toBeNull();
+    });
+
+    it("arrête un tour en cours : la réponse de l'IA n'écrit plus rien", async () => {
+      const harness = createWorkflowHarness();
+      const { workflow, ai, chat, workflowStateRepository } = harness;
+      let answer: (response: AIInteractionResponse) => void = () => undefined;
+      ai.willRespond(() => new Promise((resolve) => (answer = resolve)));
+
+      await workflow.sendMessage('o1', 'alice', 'Question');
+      await vi.waitFor(() => expect(ai.calls).toHaveLength(1));
+
+      chat.db.deleteConversation('o1');
+      await workflow.forget('o1');
+      answer(ai.text('Trop tard.'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      await expect(workflowStateRepository.findById('o1')).resolves.toBeNull();
+      expect(messagesOf(harness)).toEqual([]);
+      expect(silentLogger.errors).toEqual([]);
+    });
+
+    it("attend les sauvegardes déjà parties : aucune ne recrée l'état", async () => {
+      const { workflow, ai, workflowStateRepository } = createWorkflowHarness();
+      const save = workflowStateRepository.save.bind(workflowStateRepository);
+      vi.spyOn(workflowStateRepository, 'save').mockImplementation(async (state) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return save(state);
+      });
+      ai.willRespond(ai.text('Réponse.'));
+
+      await workflow.sendMessage('o1', 'alice', 'Question');
+      await waitForStatus(workflow, 'ready');
+      await workflow.forget('o1');
+      await new Promise((resolve) => setTimeout(resolve, 60));
+
+      await expect(workflowStateRepository.findById('o1')).resolves.toBeNull();
+    });
+
+    it('ne touche pas au workflow des autres objectifs', async () => {
+      const { workflow, ai, workflowStateRepository } = createWorkflowHarness();
+      ai.willRespond(ai.text('Bonjour Mallory.'));
+      await workflow.sendMessage('m1', 'mallory', 'Salut');
+      await waitForStatus(workflow, 'ready', 'm1', 'mallory');
+
+      await workflow.forget('o1');
+
+      expect(workflow.activeWorkflowCount).toBe(1);
+      await expect(workflowStateRepository.findById('m1')).resolves.not.toBeNull();
+    });
+
+    it('journalise une panne du stockage sans la remonter', async () => {
+      const { workflow, workflowStateRepository } = createWorkflowHarness();
+      const failure = new Error('Firestore indisponible');
+      vi.spyOn(workflowStateRepository, 'delete').mockRejectedValueOnce(failure);
+
+      await expect(workflow.forget('o1')).resolves.toBeUndefined();
+
+      expect(silentLogger.errors).toEqual([failure]);
     });
   });
 });

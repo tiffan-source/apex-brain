@@ -31,6 +31,7 @@ export interface DocumentStore {
     doc(id: string): {
       set(data: Record<string, unknown>): Promise<unknown>;
       get(): Promise<{ exists: boolean; data(): Record<string, unknown> | undefined }>;
+      delete(): Promise<unknown>;
     };
   };
 }
@@ -53,6 +54,10 @@ export class FirebaseWorkflowStateRepository implements IWorkflowStateRepository
 
     // `set` sans fusion : un ancien document d'Apex est remplacé entièrement.
     await this.firebase.db.collection(COLLECTION).doc(state.id).set(document);
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.firebase.db.collection(COLLECTION).doc(id).delete();
   }
 
   async findById(id: string): Promise<WorkflowState | null> {
