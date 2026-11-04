@@ -1,6 +1,7 @@
 import { seedObjective, seedTask } from '@org/objective/testing';
 import {
   editedTaskResponseSchema,
+  objectivesResponseSchema,
   taskDoneResponseSchema,
   todayFocusResponseSchema,
 } from '../src/objectives/objectives.schemas';
@@ -40,6 +41,33 @@ describe('Pas (e2e)', () => {
   });
 
   afterEach(() => t.close());
+
+  it("dit quelles étapes sont faites : chacune d'après ses pas, sans ordre entre elles", async () => {
+    const done = async () => {
+      const { body } = await t.http().get('/v1/objectives').set('Authorization', alice.authorization);
+      const { objectives } = objectivesResponseSchema.parse(body);
+      return Object.fromEntries(objectives.map((row) => [row.id, row.done]));
+    };
+
+    await expect(done()).resolves.toEqual({ o1: false, s1: false, s2: false });
+
+    seedTask(t.objectives.db, { id: 't3', ownerId: alice.id, objectiveId: 's2' });
+    await t
+      .http()
+      .put('/v1/tasks/t3/done')
+      .set('Authorization', alice.authorization)
+      .send({ done: true });
+
+    await expect(done()).resolves.toEqual({ o1: false, s1: false, s2: true });
+
+    await t
+      .http()
+      .put('/v1/tasks/t1/done')
+      .set('Authorization', alice.authorization)
+      .send({ done: true });
+
+    await expect(done()).resolves.toEqual({ o1: true, s1: true, s2: true });
+  });
 
   it('coche et décoche un pas (UpdateDoneStatusOfTask)', async () => {
     const checked = await t

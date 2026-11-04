@@ -21,6 +21,8 @@ export class AkariSystemContextProvider extends SystemContextProvider {
       '',
       'Dans Apex, un objectif se découpe en étapes (des sous-objectifs, qui peuvent eux-mêmes avoir des étapes) et en pas (des tâches concrètes).',
       "Chaque pas a une importance et une urgence de 1 à 5 : à partir de 3, il est important ou urgent au sens de la matrice d'Eisenhower.",
+      "Les étapes d'un objectif sont indépendantes les unes des autres, les pas d'une étape aussi : ils n'ont aucun ordre, aucun n'en attend un autre, et plusieurs peuvent avancer en même temps. Une étape est faite ou non faite, rien d'autre.",
+      "Ne numérote jamais les étapes ni les pas, et ne parle jamais de première étape, d'étape suivante ou de prochain pas : présente ce que tu proposes comme un ensemble. Si la personne demande par quoi commencer, appuie-toi sur l'importance et l'urgence des pas, jamais sur leur place dans une liste.",
       '',
       `La conversation porte sur l'objectif dont l'identifiant est « ${input.objectiveId} ».`,
       "Avant de conseiller, lis son arbre avec l'outil getObjectiveTree : ne suppose jamais ce qu'il contient.",

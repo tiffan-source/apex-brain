@@ -26,8 +26,8 @@ export type GetAllObjectiveAndTaskOutput = {
 };
 
 /**
- * Tous les objectifs, étapes et pas de la personne, à plat, dans un ordre stable
- * (création, puis id).
+ * Tous les objectifs, étapes et pas de la personne, à plat. Le tri (création, puis id) garde seulement
+ * l'affichage stable d'une lecture à l'autre : étapes et pas n'ont aucun ordre.
  */
 export abstract class GetAllObjectiveAndTaskQuery {
   abstract execute(input: GetAllObjectiveAndTaskInput): Promise<GetAllObjectiveAndTaskOutput>;

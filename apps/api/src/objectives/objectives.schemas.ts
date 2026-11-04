@@ -71,6 +71,8 @@ export const objectivesResponseSchema = z.object({
       why: z.string(),
       dueDate: dateOutputSchema.nullable(),
       parentObjective: z.string().nullable(),
+      /** Fait ou non fait, d'après ses pas : les clients l'affichent sans le calculer. */
+      done: z.boolean(),
     }),
   ),
   tasks: z.array(

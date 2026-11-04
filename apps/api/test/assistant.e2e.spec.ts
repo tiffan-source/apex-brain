@@ -131,7 +131,7 @@ describe('Conversation et assistant (e2e)', () => {
       t.ai.text("C'est ajouté."),
     );
 
-    await send('Ajoute un premier pas');
+    await send('Ajoute un pas');
     const waiting = await waitFor('awaiting-permission');
     expect(waiting.pendingToolCall).toMatchObject({ id: 'call-1', name: 'createTask' });
 

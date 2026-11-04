@@ -10,7 +10,7 @@ export class GetObjectiveTreeTool implements Tool<typeof getObjectiveTreeInput, 
   readonly name = 'getObjectiveTree';
 
   readonly description =
-    "Lire l'arbre complet sous un objectif ou une étape : ses étapes, ses pas, leur importance, leur urgence et ce qui est fait.";
+    "Lire l'arbre complet sous un objectif ou une étape : ses étapes, ses pas, leur importance, leur urgence et ce qui est fait. Les listes n'ont aucun ordre : étapes et pas sont indépendants.";
 
   readonly inputSchema = getObjectiveTreeInput;
 

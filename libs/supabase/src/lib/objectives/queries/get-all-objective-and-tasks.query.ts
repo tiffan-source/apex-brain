@@ -12,8 +12,8 @@ export class SupabaseGetAllObjectiveAndTaskQuery implements GetAllObjectiveAndTa
   async execute(input: GetAllObjectiveAndTaskInput): Promise<GetAllObjectiveAndTaskOutput> {
     const db = this.supabaseClient.clientInstance;
 
-    // Ordre stable (création, puis id) : dans Apex, sans ORDER BY, chaque écriture déplaçait
-    // la ligne modifiée en fin de lecture.
+    // Un tri stable (création, puis id), sans valeur métier : dans Apex, sans ORDER BY, chaque écriture
+    // déplaçait la ligne modifiée en fin de lecture, et l'écran sautait.
     const [objectivesResult, tasksResult] = await Promise.all([
       db.from('objectives').select('*').eq('user_id', input.ownerId).order('created_at').order('id'),
       db.from('tasks').select('*').eq('user_id', input.ownerId).order('created_at').order('id'),

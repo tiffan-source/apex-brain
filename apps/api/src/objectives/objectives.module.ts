@@ -8,6 +8,8 @@ import {
   DeleteTaskUsecase,
   EditMyTaskUsecase,
   EditObjectiveUsecase,
+  GetAllObjectiveAndTaskQuery,
+  GetMyObjectivesUsecase,
   ObjectiveRepository,
   TaskRepository,
   UpdateDoneStatusOfTaskUsecase,
@@ -23,6 +25,11 @@ import { TasksController } from './tasks.controller';
   imports: [AssistantModule],
   controllers: [ObjectivesController, TasksController],
   providers: [
+    {
+      provide: GetMyObjectivesUsecase,
+      useFactory: (query: GetAllObjectiveAndTaskQuery) => new GetMyObjectivesUsecase(query),
+      inject: [GetAllObjectiveAndTaskQuery],
+    },
     {
       provide: CreateObjectiveUsecase,
       useFactory: (repository: ObjectiveRepository, ids: IdGenerator) =>

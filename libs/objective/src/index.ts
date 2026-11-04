@@ -6,6 +6,7 @@ export * from './lib/usecases/delete-objective.usecase';
 export * from './lib/usecases/delete-task.usecase';
 export * from './lib/usecases/edit-my-objective.usecase';
 export * from './lib/usecases/edit-my-task.usecase';
+export * from './lib/usecases/get-my-objectives.usecase';
 export * from './lib/usecases/what-is-today-focus.usecase';
 
 export * from './lib/protocols/objective.repository';

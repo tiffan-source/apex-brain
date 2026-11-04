@@ -1,4 +1,4 @@
-import { Objective } from './objective';
+import { Objective, allTasksDone } from './objective';
 import { Task } from './task';
 
 describe('Objective', () => {
@@ -21,6 +21,25 @@ describe('Objective', () => {
     expect(stage.parentId).toBe('o1');
     expect(stage.isMainObjective).toBe(false);
     expect(objective.isMainObjective).toBe(true);
+  });
+
+  it('rassemble ses pas et ceux de ses sous-objectifs', () => {
+    const objective = new Objective('o1', 'Courir un marathon');
+    const stage = new Objective('s1', 'Préparer le corps');
+    const deeper = new Objective('s2', 'Dormir mieux');
+    objective.addTask(new Task('t1', 'Choisir une course', 3, 2));
+    stage.addTask(new Task('t2', 'Courir 5 km', 3, 2));
+    deeper.addTask(new Task('t3', 'Se coucher tôt', 3, 2));
+    stage.addSubObjective(deeper);
+    objective.addSubObjective(stage);
+
+    expect(objective.allTasks.map((task) => task.id)).toEqual(['t1', 't2', 't3']);
+  });
+
+  it("n'est fait qu'avec au moins un pas, et tous faits", () => {
+    expect(allTasksDone([])).toBe(false);
+    expect(allTasksDone([{ done: true }, { done: false }])).toBe(false);
+    expect(allTasksDone([{ done: true }, { done: true }])).toBe(true);
   });
 
   it("retire l'échéance", () => {
