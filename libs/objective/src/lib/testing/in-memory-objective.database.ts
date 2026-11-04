@@ -42,15 +42,21 @@ export class InMemoryObjectiveDatabase {
   readonly objectives = new Map<string, ObjectiveRow>();
   readonly tasks = new Map<string, TaskRow>();
 
-  /** Fait échouer les prochaines écritures (le `save` rend `false`). */
+  /** Fait échouer les prochaines écritures (le `save` rend `false`, le `delete` lève une erreur). */
   failWrites = false;
 
   private clock = 0;
   private readonly objectiveCreatedListeners: Array<(row: ObjectiveRow) => void> = [];
+  private readonly objectiveDeletedListeners: Array<(row: ObjectiveRow) => void> = [];
 
   /** Être prévenu à la création d'un objectif (comme le trigger qui crée sa conversation). */
   onObjectiveCreated(listener: (row: ObjectiveRow) => void): void {
     this.objectiveCreatedListeners.push(listener);
+  }
+
+  /** Être prévenu de la suppression d'un objectif (comme la cascade qui emporte sa conversation). */
+  onObjectiveDeleted(listener: (row: ObjectiveRow) => void): void {
+    this.objectiveDeletedListeners.push(listener);
   }
 
   tick(): number {
@@ -70,6 +76,20 @@ export class InMemoryObjectiveDatabase {
   upsertTask(row: Omit<TaskRow, 'createdAt'>): void {
     const existing = this.tasks.get(row.id);
     this.tasks.set(row.id, { ...row, createdAt: existing?.createdAt ?? this.tick() });
+  }
+
+  /** Comme `ON DELETE CASCADE` : les étapes de l'objectif et tous leurs pas le suivent. */
+  deleteObjective(id: string): void {
+    const subtree = collectSubtree(id, [...this.objectives.values()]);
+
+    for (const task of [...this.tasks.values()]) {
+      if (subtree.has(task.objectiveId)) this.tasks.delete(task.id);
+    }
+    for (const objectiveId of subtree) {
+      const row = this.objectives.get(objectiveId) as ObjectiveRow;
+      this.objectives.delete(objectiveId);
+      this.objectiveDeletedListeners.forEach((listener) => listener(row));
+    }
   }
 
   objectivesOf(ownerId: string): ObjectiveRow[] {
@@ -162,6 +182,16 @@ export class InMemoryObjectiveRepository extends ObjectiveRepository {
     return objective;
   }
 
+  async delete(id: string, ownerId: string): Promise<boolean> {
+    if (this.db.failWrites) throw new Error(`Failed to delete objective ${id}`);
+
+    const row = this.db.objectives.get(id);
+    if (!row || row.ownerId !== ownerId) return false;
+
+    this.db.deleteObjective(id);
+    return true;
+  }
+
   private ownedByAnother(row: { ownerId: string } | undefined, ownerId: string): boolean {
     return row !== undefined && row.ownerId !== ownerId;
   }
@@ -193,6 +223,15 @@ export class InMemoryTaskRepository extends TaskRepository {
       urgency: task.urgency,
     });
     return true;
+  }
+
+  async delete(taskId: string, ownerId: string): Promise<boolean> {
+    if (this.db.failWrites) throw new Error(`Failed to delete task ${taskId}`);
+
+    const row = this.db.tasks.get(taskId);
+    if (!row || row.ownerId !== ownerId) return false;
+
+    return this.db.tasks.delete(taskId);
   }
 
   async getAllUserTasks(userId: string): Promise<Task[]> {

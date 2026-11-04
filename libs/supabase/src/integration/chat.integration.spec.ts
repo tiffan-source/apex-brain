@@ -2,6 +2,7 @@ import { Objective } from '@org/objective';
 import { SupabaseObjectiveRepository } from '../lib/objectives/repositories/objective.repository';
 import { SupabaseGetAllMessagesQuery } from '../lib/chat/queries/get-conversation.query';
 import { SupabaseAddMessageCommand } from '../lib/chat/commands/add-message.command';
+import { SupabaseClientDataAccess } from '../lib/supabase-client';
 import {
   createIntegrationAccess,
   createTestUser,
@@ -15,9 +16,10 @@ describe.skipIf(!integrationEnabled)('Supabase — conversations (intégration)'
   let query: SupabaseGetAllMessagesQuery;
   let addMessage: SupabaseAddMessageCommand;
   let objectives: SupabaseObjectiveRepository;
+  let access: SupabaseClientDataAccess;
 
   beforeAll(async () => {
-    const access = createIntegrationAccess();
+    access = createIntegrationAccess();
     query = new SupabaseGetAllMessagesQuery(access);
     addMessage = new SupabaseAddMessageCommand(access);
     objectives = new SupabaseObjectiveRepository(access);
@@ -74,5 +76,29 @@ describe.skipIf(!integrationEnabled)('Supabase — conversations (intégration)'
       { sender: alice, content: 'Bonjour' },
       { sender: 'AI', content: 'Salut.' },
     ]);
+  });
+
+  it("emporte la conversation et ses messages avec l'objectif", async () => {
+    const objective = new Objective(testId('o'), 'À supprimer');
+    await objectives.save(objective, alice);
+    const conversation = await query.execute({ externalReferenceId: objective.id, ownerId: alice });
+    if (!conversation) throw new Error('conversation attendue');
+    const messageId = testId('m');
+    await addMessage.execute({
+      id: messageId,
+      conversationId: conversation.id,
+      userId: alice,
+      message: 'Bonjour',
+    });
+
+    await expect(objectives.delete(objective.id, alice)).resolves.toBe(true);
+
+    await expect(query.execute({ externalReferenceId: objective.id, ownerId: alice })).resolves.toBeNull();
+
+    const db = access.clientInstance;
+    await expect(db.from('messages').select('id').eq('id', messageId)).resolves.toMatchObject({ data: [] });
+    await expect(db.from('conversations').select('id').eq('id', conversation.id)).resolves.toMatchObject({
+      data: [],
+    });
   });
 });

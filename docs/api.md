@@ -64,6 +64,8 @@ l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt`
 | `POST /v1/objectives/{objectiveId}/tasks` | `AddTaskToObjectiveUsecase` | `{ title, importance, urgency }` | `201 { id, title, importance, urgency }` |
 | `PATCH /v1/tasks/{taskId}` | `EditMyTaskUsecase` | `{ title, objectiveId, importance, urgency }` | `200 { id, title, objectiveId, importance, urgency }` |
 | `PUT /v1/tasks/{taskId}/done` | `UpdateDoneStatusOfTaskUsecase` | `{ done }` | `200 { id, title, done }` |
+| `DELETE /v1/objectives/{objectiveId}` | `DeleteObjectiveUsecase` | — | `204` |
+| `DELETE /v1/tasks/{taskId}` | `DeleteTaskUsecase` | — | `204` |
 | `GET /v1/tasks/today-focus` | `WhatIsTodayFocusUsecase` | — | `200 [{ id, title, objectiveId, important, urgent, dueDate?, done }]` |
 
 - `ObjectiveOutput` : `{ id, title, description, why, dueDate | null, parentObjective | null, done }` ;
@@ -79,6 +81,12 @@ l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt`
   Vaut pour un objectif comme pour une étape.
 - `PATCH /v1/tasks/{id}` : changer `objectiveId` déplace le pas (vers une étape, un objectif,
   un ancêtre).
+- `DELETE /v1/objectives/{id}` : vaut pour un objectif comme pour une étape, et emporte tout ce qui
+  en dépend : ses étapes, leurs pas et, pour un objectif principal, sa conversation, ses messages
+  et son assistant (arrêté même en plein tour). Supprimer une étape ne touche ni à son objectif, ni
+  à sa conversation. La suppression est définitive : il n'y a pas de corbeille.
+- Supprimer un élément déjà supprimé (double appui, nouvel essai après une coupure) répond `404` :
+  le client peut le traiter comme un succès.
 - `importance` et `urgency` vont de 1 à 5 (à partir de 3 : important, urgent).
 
 ## Conversation et assistant
@@ -90,26 +98,57 @@ l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt`
 | `POST /v1/objectives/{objectiveId}/assistant/messages` | `sendMessage` | `{ message }` | `202 WorkflowState` |
 | `POST /v1/objectives/{objectiveId}/assistant/permission` | `respondToPermission` | `{ granted, toolCallId? }` | `202 WorkflowState` |
 
-Seul un objectif principal a une conversation (une étape répond `404 CONVERSATION_NOT_FOUND`).
+Seul un objectif principal a une conversation (une étape, ou un objectif supprimé, répond
+`404 CONVERSATION_NOT_FOUND`).
 `sender` vaut l'id de la personne, ou `AI` pour Akari.
 
 ```text
 WorkflowState = {
   objectiveId,
-  value,              // valeur de la machine XState, comme dans Apex
+  value,              // déprécié : la valeur de la machine XState (lire `activity`)
   status,             // ready | processing | awaiting-permission
+  activity,           // ce que fait Akari, null au repos (voir plus bas)
   pendingToolCall,    // { id, name, arguments } quand status = awaiting-permission, sinon null
   lastRegisteredMessage, // { id, content, sender, createdAt } | null
   lastError           // { code, step, at } | null : la panne du dernier tour
 }
+
+activity = {
+  step,               // ce qu'Akari fait maintenant
+  elapsedMs,          // le temps déjà passé sur cette étape, mesuré par le serveur
+  round,              // ses passages par l'IA depuis le début du tour (2 et plus : un tour de boucle)
+  done                // ce qu'il a déjà fait pendant ce tour, du plus ancien au plus récent
+}
 ```
+
+`step` et `done` utilisent les codes ci-dessous. Ils sont le contrat : les clients choisissent leur
+phrase d'après eux et ignorent un code qu'ils ne connaissent pas. Ils ne disent ni quel outil tourne,
+ni quel fournisseur d'IA répond, ni dans quel état est la machine.
+
+| Code | Akari… |
+|---|---|
+| `saving-message` | enregistre le message de la personne |
+| `thinking` | réfléchit à la demande (premier passage par l'IA) |
+| `checking-permission` | vérifie si ce qu'il veut faire demande l'accord de la personne |
+| `awaiting-permission` | attend cet accord (`status: awaiting-permission`) |
+| `reading` | lit les données de la personne |
+| `writing` | écrit ce que la personne a accepté |
+| `reviewing` | fait le point sur ce qu'il vient de faire (nouveau passage par l'IA) |
+| `saving-reply` | enregistre sa réponse |
+
+`done` garde les étapes trop brèves pour qu'une interrogation chaque seconde les voie passer : la
+vérification d'un accord dure quelques millisecondes, un appel à l'IA plusieurs secondes. Une étape y
+figure parce qu'elle a eu lieu, pas parce qu'elle a réussi : une écriture refusée par un outil reste
+`writing`, et c'est Akari qui le dit dans sa réponse. Un tour commencé avant l'arrivée de `activity`
+peut être `processing` avec `activity: null`.
 
 Un tour se déroule ainsi :
 
 1. `POST …/assistant/messages` → `202`, `status: processing`. Un message pendant un tour en cours
    répond `409 WORKFLOW_BUSY`.
 2. Le client interroge `GET …/assistant` (Apex : chaque seconde) jusqu'à `ready` ou
-   `awaiting-permission`. `lastRegisteredMessage` donne le message enregistré à afficher.
+   `awaiting-permission`. `activity` dit ce que fait Akari, `lastRegisteredMessage` donne le message
+   enregistré à afficher.
 3. Si Akari veut ajouter une étape (`createSubObjective`) ou un pas (`createTask`) :
    `status: awaiting-permission`, `pendingToolCall` décrit la proposition. Le client répond par
    `POST …/assistant/permission` avec `granted` et le `toolCallId` reçu, puis reprend

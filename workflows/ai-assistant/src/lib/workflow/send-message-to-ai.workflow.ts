@@ -160,6 +160,35 @@ export class SendMessageToAIWorkflow {
   }
 
   /**
+   * Oublier le workflow d'un objectif supprimé : l'acteur s'arrête, même en plein tour, et l'état
+   * persisté disparaît (il vit hors de la base, où la cascade ne l'atteint pas).
+   *
+   * À appeler une fois l'objectif supprimé : cette suppression a vérifié le propriétaire, et la
+   * conversation n'est plus là pour le faire ici. Une panne du stockage est journalisée sans
+   * remonter : l'objectif est déjà supprimé, et sans conversation cet état ne sera plus jamais lu.
+   */
+  forget(objectiveId: string): Promise<void> {
+    return this.withLock(objectiveId, async () => {
+      const tracked = this.workflows.get(objectiveId);
+
+      if (tracked) {
+        // Dans cet ordre : plus aucune transition n'est sauvegardée, puis on attend celles qui
+        // sont parties. Aucune écriture ne peut ainsi recréer l'état après sa suppression.
+        this.workflows.delete(objectiveId);
+        tracked.subscription?.unsubscribe();
+        tracked.actor.stop();
+        await tracked.persisting;
+      }
+
+      try {
+        await this.deps.workflowStateRepository.delete(objectiveId);
+      } catch (error) {
+        this.logger.error(`Workflow ${objectiveId}: the persisted state could not be deleted`, error);
+      }
+    });
+  }
+
+  /**
    * Libérer la mémoire des workflows au repos depuis plus que le délai d'inactivité. Ils restent
    * persistés et seront restaurés au prochain accès. Rend les ids libérés.
    */
@@ -267,6 +296,7 @@ export class SendMessageToAIWorkflow {
             aiResponse: null,
             toolCallResults: [],
             currentToolCall: undefined,
+            activity: [],
             lastError: {
               code: 'TURN_INTERRUPTED',
               message: 'The turn was interrupted and could not be resumed',
@@ -342,10 +372,14 @@ export class SendMessageToAIWorkflow {
 
   private view(objectiveId: string, tracked: TrackedWorkflow): WorkflowStateView {
     const snapshot = tracked.actor.getSnapshot();
-    return toWorkflowStateView(objectiveId, {
-      value: snapshot.value as WorkflowStateValue,
-      context: snapshot.context,
-    });
+    return toWorkflowStateView(
+      objectiveId,
+      {
+        value: snapshot.value as WorkflowStateValue,
+        context: snapshot.context,
+      },
+      this.deps.now?.() ?? new Date(),
+    );
   }
 
   private actorOptions() {

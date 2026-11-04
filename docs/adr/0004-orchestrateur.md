@@ -15,8 +15,8 @@ Firestore à chaque transition, interrogé chaque seconde par l'écran.
 - La machine et ses ports restent ceux d'Apex (`IChatActor`, `IAIActor`, `IToolExecutor`,
   `IToolExecutionPolicy`, `IToolRegistry`, `IWorkflowStateRepository`) ; le serveur les assemble.
 - L'API expose l'état sous une forme stable (`docs/api.md`) plutôt que le snapshot XState brut :
-  la valeur de la machine (`value`, pour les écrans existants), l'outil en attente d'accord, le
-  dernier message enregistré, la dernière panne.
+  la valeur de la machine (`value`, pour les écrans existants, remplacée par `activity` :
+  ADR 0005), l'outil en attente d'accord, le dernier message enregistré, la dernière panne.
 - **Persistance du snapshot complet** (`actor.getPersistedSnapshot()`), sérialisé en JSON dans
   Firestore. Restaurer un snapshot relance l'étape qui était en cours ; `resolveState` (Apex) ne
   le faisait pas et laissait le tour bloqué. Les anciens documents (`value` + `context`) restent

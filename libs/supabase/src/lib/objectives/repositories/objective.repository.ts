@@ -121,6 +121,22 @@ export class SupabaseObjectiveRepository implements ObjectiveRepository {
     return ObjectiveMapper.toDomain(flatObjectives, flatTasks ?? [], id);
   }
 
+  async delete(id: string, ownerId: string): Promise<boolean> {
+    // La base emporte le reste (`ON DELETE CASCADE`) : étapes, pas, conversation et messages.
+    const { data, error } = await this.db
+      .from('objectives')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', ownerId)
+      .select('id');
+
+    if (error) {
+      throw new Error(`Erreur suppression objectif: ${error.message}`);
+    }
+
+    return (data?.length ?? 0) === 1;
+  }
+
   private async touchesForeignRows(
     objectiveIds: string[],
     taskIds: string[],

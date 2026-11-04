@@ -1,10 +1,23 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Param,
+  Patch,
+  Post,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { SendMessageToAIWorkflow } from '@org/ai-assistant';
 import type { AuthenticatedUserOutput } from '@org/auth';
 import {
   AddSubObjectiveUsecase,
   AddTaskToObjectiveUsecase,
   CreateObjectiveUsecase,
+  DeleteObjectiveUsecase,
   EditObjectiveUsecase,
   GetMyObjectivesUsecase,
 } from '@org/objective';
@@ -37,6 +50,8 @@ export class ObjectivesController {
     @Inject(GetMyObjectivesUsecase) private readonly getMyObjectives: GetMyObjectivesUsecase,
     @Inject(CreateObjectiveUsecase) private readonly createObjective: CreateObjectiveUsecase,
     @Inject(EditObjectiveUsecase) private readonly editObjective: EditObjectiveUsecase,
+    @Inject(DeleteObjectiveUsecase) private readonly deleteObjective: DeleteObjectiveUsecase,
+    @Inject(SendMessageToAIWorkflow) private readonly assistant: SendMessageToAIWorkflow,
     @Inject(AddSubObjectiveUsecase) private readonly addSubObjective: AddSubObjectiveUsecase,
     @Inject(AddTaskToObjectiveUsecase) private readonly addTaskToObjective: AddTaskToObjectiveUsecase,
   ) {}
@@ -71,6 +86,22 @@ export class ObjectivesController {
     return unwrap(
       await this.editObjective.execute({ objective: { id: objectiveId, ...body }, ownerId: user.id }),
     );
+  }
+
+  /**
+   * DeleteObjectiveUsecase : un objectif ou une étape, avec tout ce qui en dépend. La base emporte
+   * étapes, pas, conversation et messages ; l'état de l'assistant, qui vit hors de la base, part ensuite.
+   */
+  @Delete(':objectiveId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiResponse({ status: 204, description: 'Supprimé, avec tout ce qui en dépend' })
+  @ApiResponse({ status: 404, description: 'OBJECTIVE_NOT_FOUND', schema: openApiErrorSchema() })
+  async remove(
+    @CurrentUser() user: AuthenticatedUserOutput,
+    @Param('objectiveId', { schema: objectiveIdParam }) objectiveId: string,
+  ): Promise<void> {
+    unwrap(await this.deleteObjective.execute({ objectiveId, ownerId: user.id }));
+    await this.assistant.forget(objectiveId);
   }
 
   /** AddSubObjectiveUsecase : une étape sous un objectif ou une étape. */

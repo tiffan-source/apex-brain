@@ -61,6 +61,8 @@ restent internes.
 | `AddTaskToObjectiveUsecase` | cas d'usage | `POST /v1/objectives/{objectiveId}/tasks` |
 | `EditMyTaskUsecase` | cas d'usage | `PATCH /v1/tasks/{taskId}` |
 | `UpdateDoneStatusOfTaskUsecase` | cas d'usage | `PUT /v1/tasks/{taskId}/done` |
+| `DeleteObjectiveUsecase` *(nouveau)* | cas d'usage | `DELETE /v1/objectives/{objectiveId}` |
+| `DeleteTaskUsecase` *(nouveau)* | cas d'usage | `DELETE /v1/tasks/{taskId}` |
 | `WhatIsTodayFocusUsecase` | cas d'usage | `GET /v1/tasks/today-focus` |
 | `GetConversationsQuery` | query | `GET /v1/objectives/{objectiveId}/conversation` |
 | `SendMessageToAIWorkflow.startWorkFlow` + `getState` | workflow | `GET /v1/objectives/{objectiveId}/assistant` |
@@ -70,6 +72,14 @@ restent internes.
 `RefreshSessionUseCase` et `LogUserOutUseCase` sont nouveaux : dès que l'authentification passe
 par le serveur, les clients doivent pouvoir renouveler un jeton expiré et fermer une session sans
 parler à Supabase. La déconnexion figurait déjà dans les cas d'usage manquants du `TODO.md` d'Apex.
+
+`DeleteObjectiveUsecase` et `DeleteTaskUsecase` sont nouveaux eux aussi : une seule route supprime
+un objectif ou une étape, comme `PATCH /v1/objectives/{objectiveId}` modifie l'un ou l'autre. Il n'y
+a pas de règle métier : la propriété borne la suppression, et les `ON DELETE CASCADE` de la base
+emportent étapes, pas, conversation et messages. L'état de l'assistant vit dans Firestore, hors de
+cette cascade : la route met fin au workflow (`SendMessageToAIWorkflow.forget`) une fois l'objectif
+supprimé. C'est pour cela que `ObjectivesModule` importe `AssistantModule`, et que
+`ObjectiveInternalService`, dont seul l'assistant se sert, est construit dans ce dernier.
 
 Le contrat détaillé (corps, réponses, codes d'erreur) est dans [`docs/api.md`](./api.md) ; le
 document OpenAPI est servi par l'API sur `/docs` et `/docs-json`.
@@ -190,9 +200,10 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
   faite ou non faite, rien d'autre : `done` dans `GET /v1/objectives` (`GetMyObjectivesUsecase`),
   et les clients l'affichent sans le calculer. Il vaut `true` avec au moins un pas, tous faits ; la
   colonne `objectives.done` n'est toujours pas lue. Akari le sait (instructions, `getObjectiveTree`).
-- **Règles métier encore dans le client** : la catégorie d'Eisenhower (`apex-library`) et
-  `levelsForQuadrant` (déplacer un pas dans la matrice) vivent dans les clients web et mobile. Un
-  cas d'usage `MoveTaskToQuadrant` et la catégorie calculée par le serveur les rendraient communs.
+- **Règles métier encore dans le client** : la catégorie d'Eisenhower vit encore dans le client
+  mobile ; le web a retiré sa matrice en attendant que le serveur la calcule. Aucun cas d'usage de
+  déplacement n'est prévu : un pas ne se déplace pas depuis la matrice, il suit son importance et
+  son urgence, modifiées depuis l'objectif.
 - **Vérifications non faites ici** : l'appel réel à Gemini (pas de clé dans l'environnement de
   travail) et Firestore réel (testé avec une doublure qui en reproduit les limites). Le SDK Gemini
   est vérifié face à un faux serveur HTTP : adresse, clé dans `x-goog-api-key`, lecture des
@@ -203,13 +214,19 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Interactions conservées par Gemini** : 1 jour sur le palier gratuit, 55 jours sur le palier
   payant. Une conversation reprise après ce délai envoie un `previous_interaction_id` expiré ;
   le comportement de Gemini dans ce cas (et la reprise à prévoir) reste à vérifier.
-- **Backlog d'Apex** encore ouvert : laisser filer ou supprimer (objectif, étape, pas), renommer
-  les cas d'usage selon le métier (`DefineObjective`…), plusieurs instances du serveur (les
+- **État de l'assistant** : retirer `value` et `lastError.step` quand plus aucune version installée
+  ne les lira. Les clients à jour lisent `activity` (`docs/adr/0005-activite-de-l-assistant.md`).
+- **Backlog d'Apex** encore ouvert : laisser filer (objectif, étape, pas), renommer les cas
+  d'usage selon le métier (`DefineObjective`…), plusieurs instances du serveur (les
   acteurs XState vivent en mémoire d'un seul processus).
 
 ## 8. Questions ouvertes
 
 - `WhatIsTodayFocusUsecase` garde les pas déjà faits dans les cinq pas du jour (comportement
   d'Apex conservé). S'ils doivent sortir du focus une fois cochés, c'est un filtre à ajouter.
+- `ObjectiveRepository.save` réécrit tout l'arbre chargé : une écriture commencée avant une
+  suppression peut faire réapparaître ce qui vient d'être supprimé (Akari ajoute un pas à l'objectif
+  pendant qu'on supprime une de ses étapes). La fenêtre se compte en millisecondes ; la fermer
+  demanderait que `save` n'écrive que ce qui a changé.
 - Le client web n'utilise plus `WhatIsTodayFocusUsecase` depuis la V1 (pas d'écran Aujourd'hui) :
   l'endpoint est exposé pour le mobile, à retirer s'il n'en a pas l'usage.

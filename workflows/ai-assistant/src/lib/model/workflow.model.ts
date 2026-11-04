@@ -13,6 +13,38 @@ export type WorkflowError = {
 };
 
 /**
+ * Ce que fait l'assistant pendant un tour, en codes publics et stables. C'est tout ce que les clients
+ * apprennent du déroulement d'un tour : ni l'IA, ni les outils, ni les états de la machine n'y paraissent,
+ * et la machine peut changer sans que ces codes changent.
+ */
+export const WORKFLOW_ACTIVITY_STEPS = [
+  /** Il enregistre le message de la personne. */
+  'saving-message',
+  /** Il réfléchit à la demande (premier passage par l'IA). */
+  'thinking',
+  /** Il vérifie si ce qu'il veut faire demande l'accord de la personne. */
+  'checking-permission',
+  /** Il attend l'accord de la personne. */
+  'awaiting-permission',
+  /** Il lit les données de la personne. */
+  'reading',
+  /** Il écrit ce que la personne a accepté. */
+  'writing',
+  /** Il fait le point sur ce qu'il vient de faire (nouveau passage par l'IA). */
+  'reviewing',
+  /** Il enregistre sa réponse. */
+  'saving-reply',
+] as const;
+
+export type WorkflowActivityStep = (typeof WORKFLOW_ACTIVITY_STEPS)[number];
+
+/** Une étape du tour en cours : quoi, et depuis quand (ISO 8601). */
+export type WorkflowActivityEntry = {
+  step: WorkflowActivityStep;
+  at: string;
+};
+
+/**
  * The data carried by a workflow throughout its execution.
  *
  * This is the single source of truth for the workflow shape: it both describes
@@ -38,6 +70,12 @@ export type WorkflowContext = {
   pendingAIMessageId?: string;
   /** La panne du dernier tour, effacée au message suivant. */
   lastError?: WorkflowError;
+  /**
+   * Le journal du tour en cours, de la première étape à l'étape en cours (la dernière), vide au repos.
+   * Il garde les étapes trop brèves pour qu'une interrogation chaque seconde les voie passer. Absent des
+   * états persistés avant son arrivée.
+   */
+  activity?: WorkflowActivityEntry[];
 };
 
 /**
@@ -87,4 +125,6 @@ export type WorkflowState = {
 export abstract class IWorkflowStateRepository {
   abstract save(state: WorkflowState): Promise<void>;
   abstract findById(id: string): Promise<WorkflowState | null>;
+  /** Sans effet si ce workflow n'a pas d'état persisté. */
+  abstract delete(id: string): Promise<void>;
 }

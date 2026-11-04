@@ -4,6 +4,7 @@ import { SystemContextProvider } from '../context/system-context.provider';
 import {
   AI_SENDER_ID,
   WORKFLOW_READY_FOR_NEW_MESSAGE,
+  WorkflowActivityStep,
   WorkflowContext,
   WorkflowError,
 } from '../model/workflow.model';
@@ -53,6 +54,7 @@ export function initialWorkflowContext(): WorkflowContext {
     pendingUserMessageId: undefined,
     pendingAIMessageId: undefined,
     lastError: undefined,
+    activity: [],
   };
 }
 
@@ -94,10 +96,24 @@ export const getMachine = (deps: MachineDependencies) => {
   const systemInstruction = (input: TurnInput) =>
     deps.systemContextProvider.getContext({ objectiveId: input.objectiveId, userId: input.userId });
 
+  /** Un outil qui demande un accord écrit dans les données de la personne ; les autres les lisent. */
+  const toolActivity = (toolCall: ToolCall | undefined): WorkflowActivityStep =>
+    deps.toolRegistry.getAll().some((tool) => tool.name === toolCall?.name && tool.requiresPermission)
+      ? 'writing'
+      : 'reading';
+
   return setup({
     types: {
       context: {} as WorkflowContext,
       events: {} as WorkflowEvent,
+    },
+    actions: {
+      recordActivity: assign({
+        activity: ({ context }, params: { step: WorkflowActivityStep }) => [
+          ...(context.activity ?? []),
+          { step: params.step, at: now().toISOString() },
+        ],
+      }),
     },
     actors: {
       registerMessage: fromPromise<RegisterMessageResult, RegisterMessageInput>(({ input }) =>
@@ -142,6 +158,8 @@ export const getMachine = (deps: MachineDependencies) => {
     initial: WORKFLOW_READY_FOR_NEW_MESSAGE,
     states: {
       [WORKFLOW_READY_FOR_NEW_MESSAGE]: {
+        // Un tour fini, ou arrêté par une panne : plus rien n'est en cours.
+        entry: assign({ activity: [] }),
         on: {
           'message.send': {
             target: 'RegisteringUserMessageInConversation',
@@ -162,6 +180,7 @@ export const getMachine = (deps: MachineDependencies) => {
       },
 
       RegisteringUserMessageInConversation: {
+        entry: { type: 'recordActivity', params: { step: 'saving-message' } },
         invoke: {
           src: 'registerMessage',
           id: 'messageGateway',
@@ -188,6 +207,7 @@ export const getMachine = (deps: MachineDependencies) => {
 
       SendingPromptToAI: {
         description: 'We are getting the prompt we send to the AI provider',
+        entry: { type: 'recordActivity', params: { step: 'thinking' } },
         invoke: {
           src: 'generateResponse',
           id: 'aiProvider',
@@ -228,6 +248,7 @@ export const getMachine = (deps: MachineDependencies) => {
       },
 
       RegisteringAIResponseInConversation: {
+        entry: { type: 'recordActivity', params: { step: 'saving-reply' } },
         invoke: {
           src: 'registerMessage',
           id: 'messageGateway',
@@ -273,6 +294,7 @@ export const getMachine = (deps: MachineDependencies) => {
           },
 
           CheckingExecutionPolicy: {
+            entry: { type: 'recordActivity', params: { step: 'checking-permission' } },
             invoke: {
               src: 'checkToolPolicy',
               id: 'toolPolicy',
@@ -330,6 +352,10 @@ export const getMachine = (deps: MachineDependencies) => {
           },
 
           ExecutingTool: {
+            entry: {
+              type: 'recordActivity',
+              params: ({ context }) => ({ step: toolActivity(context.currentToolCall) }),
+            },
             invoke: {
               src: 'executeTool',
               id: 'toolProvider',
@@ -369,6 +395,7 @@ export const getMachine = (deps: MachineDependencies) => {
           },
 
           WaitingForUserPermission: {
+            entry: { type: 'recordActivity', params: { step: 'awaiting-permission' } },
             on: {
               'user.response': [
                 { target: 'ExecutingTool', guard: ({ event }) => event.permission },
@@ -403,6 +430,7 @@ export const getMachine = (deps: MachineDependencies) => {
       },
 
       SendingCallResultToAI: {
+        entry: { type: 'recordActivity', params: { step: 'reviewing' } },
         invoke: {
           src: 'sendToolCallResult',
           id: 'aiProvider',

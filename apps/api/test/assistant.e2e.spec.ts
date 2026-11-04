@@ -93,6 +93,34 @@ describe('Conversation et assistant (e2e)', () => {
     ]);
   });
 
+  it("dit ce que fait Akari pendant un tour, sans nommer ni l'outil ni le modèle", async () => {
+    let answer: (response: ReturnType<typeof t.ai.text>) => void = () => undefined;
+    t.ai.willRespond(
+      t.ai.toolCalls({ id: 'call-1', name: 'getObjectiveTree', arguments: { id: objectiveId } }),
+      () => new Promise((resolve) => (answer = resolve)),
+    );
+
+    const accepted = await send('Où en suis-je ?');
+    expect(workflowStateResponseSchema.parse(accepted.body).activity).toMatchObject({
+      step: 'saving-message',
+      round: 0,
+      done: [],
+    });
+
+    await vi.waitFor(() => expect(t.ai.calls).toHaveLength(2));
+    const reviewing = await state();
+    expect(reviewing.activity).toEqual({
+      step: 'reviewing',
+      elapsedMs: expect.any(Number),
+      round: 2,
+      done: ['saving-message', 'thinking', 'checking-permission', 'reading'],
+    });
+    expect(JSON.stringify(reviewing.activity)).not.toMatch(/getObjectiveTree|gemini/i);
+
+    answer(t.ai.text('Ton objectif est vide.'));
+    await expect(waitFor('ready')).resolves.toMatchObject({ activity: null });
+  });
+
   it("demande l'accord avant d'ajouter un pas, puis l'ajoute pour la personne", async () => {
     t.ai.willRespond(
       t.ai.toolCalls({
@@ -179,6 +207,96 @@ describe('Conversation et assistant (e2e)', () => {
       expect(response.status).toBe(404);
       expect(response.body.error.code).toBe('CONVERSATION_NOT_FOUND');
     }
+  });
+
+  describe("suppression de l'objectif", () => {
+    const remove = (id = objectiveId) =>
+      t.http().delete(`/v1/objectives/${id}`).set('Authorization', alice.authorization);
+
+    it("emporte la conversation et met fin à l'assistant, même quand il attend un accord", async () => {
+      t.ai.willRespond(
+        t.ai.toolCalls({
+          id: 'call-1',
+          name: 'createTask',
+          arguments: { objectiveId, title: 'Courir 5 km', importance: 4, urgency: 2 },
+        }),
+      );
+      await send('Ajoute un premier pas');
+      await waitFor('awaiting-permission');
+      await expect(t.workflowStates.findById(objectiveId)).resolves.not.toBeNull();
+      expect(t.chat.db.messages.size).toBe(1);
+
+      expect((await remove()).status).toBe(204);
+
+      expect(t.chat.db.conversations.size).toBe(0);
+      expect(t.chat.db.messages.size).toBe(0);
+      await expect(t.workflowStates.findById(objectiveId)).resolves.toBeNull();
+
+      const afterwards = await Promise.all([
+        t.http().get(`/v1/objectives/${objectiveId}/conversation`).set('Authorization', alice.authorization),
+        t.http().get(`/v1/objectives/${objectiveId}/assistant`).set('Authorization', alice.authorization),
+        send('Tu es encore là ?'),
+        t
+          .http()
+          .post(`/v1/objectives/${objectiveId}/assistant/permission`)
+          .set('Authorization', alice.authorization)
+          .send({ granted: true, toolCallId: 'call-1' }),
+      ]);
+
+      for (const response of afterwards) {
+        expect(response.status).toBe(404);
+        expect(response.body.error.code).toBe('CONVERSATION_NOT_FOUND');
+      }
+      expect(t.objectives.db.tasks.size).toBe(0);
+    });
+
+    it("garde la conversation et l'assistant de l'objectif quand on supprime une de ses étapes", async () => {
+      const stage = await t
+        .http()
+        .post(`/v1/objectives/${objectiveId}/sub-objectives`)
+        .set('Authorization', alice.authorization)
+        .send({ title: 'Préparer le corps' });
+      t.ai.willRespond(t.ai.text('Commence doucement.'));
+      await send('Par où commencer ?');
+      await waitFor('ready');
+
+      expect((await remove(stage.body.id)).status).toBe(204);
+
+      expect(t.chat.db.messages.size).toBe(2);
+      await expect(state()).resolves.toMatchObject({
+        status: 'ready',
+        lastRegisteredMessage: { content: 'Commence doucement.' },
+      });
+    });
+
+    it("n'arrête pas l'assistant d'Alice quand Mallory tente la suppression", async () => {
+      t.ai.willRespond(t.ai.text('Commence doucement.'));
+      await send('Par où commencer ?');
+      await waitFor('ready');
+
+      const stolen = await t
+        .http()
+        .delete(`/v1/objectives/${objectiveId}`)
+        .set('Authorization', mallory.authorization);
+
+      expect(stolen.status).toBe(404);
+      await expect(state()).resolves.toMatchObject({ status: 'ready' });
+      await expect(t.workflowStates.findById(objectiveId)).resolves.not.toBeNull();
+    });
+
+    it("répond 204 quand l'état de l'assistant ne peut pas être effacé : l'objectif est déjà supprimé", async () => {
+      const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      vi.spyOn(t.workflowStates, 'delete').mockRejectedValueOnce(new Error('Firestore indisponible'));
+
+      const response = await remove();
+
+      expect(response.status).toBe(204);
+      expect(t.objectives.db.objectives.has(objectiveId)).toBe(false);
+      expect(logged).toHaveBeenCalledWith(
+        expect.stringContaining('could not be deleted'),
+        expect.stringContaining('Firestore indisponible'),
+      );
+    });
   });
 
   it('valide le message et la réponse à une demande', async () => {
