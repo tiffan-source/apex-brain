@@ -54,4 +54,5 @@ any SDK/NestJS) ← `type:workflow` (ai-assistant) ← `type:infra` (supabase, g
 - NestJS classes: **always `@Inject(Token)` on constructor params**, and `import type` for types used in decorated signatures (lint rule `consistent-type-imports` in `apps/api`).
 - File suffixes as in Apex: `*.usecase.ts`, `*.repository.ts`, `*.query.ts`, `*.command.ts`, `*.mapper.ts`, `*.error.ts`, `protocols/*.ts`; plus `*.module.ts`, `*.controller.ts`, `*.schemas.ts` in the app. Path aliases `@org/<lib>`.
 - New SQL goes in `supabase/migrations/` with explicit GRANTs to `service_role` (new tables are no longer auto-exposed by Supabase).
+- Clients follow an assistant turn through `activity` (public step codes and the journal of the turn, `docs/adr/0005-activite-de-l-assistant.md`): a new visible step is a new code in `WORKFLOW_ACTIVITY_STEPS`, never a tool name or a machine state. `value` is deprecated.
 - `docs/plan.md` tracks what's done and next; update it with significant changes.

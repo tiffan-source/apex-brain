@@ -296,6 +296,7 @@ export class SendMessageToAIWorkflow {
             aiResponse: null,
             toolCallResults: [],
             currentToolCall: undefined,
+            activity: [],
             lastError: {
               code: 'TURN_INTERRUPTED',
               message: 'The turn was interrupted and could not be resumed',
@@ -371,10 +372,14 @@ export class SendMessageToAIWorkflow {
 
   private view(objectiveId: string, tracked: TrackedWorkflow): WorkflowStateView {
     const snapshot = tracked.actor.getSnapshot();
-    return toWorkflowStateView(objectiveId, {
-      value: snapshot.value as WorkflowStateValue,
-      context: snapshot.context,
-    });
+    return toWorkflowStateView(
+      objectiveId,
+      {
+        value: snapshot.value as WorkflowStateValue,
+        context: snapshot.context,
+      },
+      this.deps.now?.() ?? new Date(),
+    );
   }
 
   private actorOptions() {

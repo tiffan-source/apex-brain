@@ -93,6 +93,34 @@ describe('Conversation et assistant (e2e)', () => {
     ]);
   });
 
+  it("dit ce que fait Akari pendant un tour, sans nommer ni l'outil ni le modèle", async () => {
+    let answer: (response: ReturnType<typeof t.ai.text>) => void = () => undefined;
+    t.ai.willRespond(
+      t.ai.toolCalls({ id: 'call-1', name: 'getObjectiveTree', arguments: { id: objectiveId } }),
+      () => new Promise((resolve) => (answer = resolve)),
+    );
+
+    const accepted = await send('Où en suis-je ?');
+    expect(workflowStateResponseSchema.parse(accepted.body).activity).toMatchObject({
+      step: 'saving-message',
+      round: 0,
+      done: [],
+    });
+
+    await vi.waitFor(() => expect(t.ai.calls).toHaveLength(2));
+    const reviewing = await state();
+    expect(reviewing.activity).toEqual({
+      step: 'reviewing',
+      elapsedMs: expect.any(Number),
+      round: 2,
+      done: ['saving-message', 'thinking', 'checking-permission', 'reading'],
+    });
+    expect(JSON.stringify(reviewing.activity)).not.toMatch(/getObjectiveTree|gemini/i);
+
+    answer(t.ai.text('Ton objectif est vide.'));
+    await expect(waitFor('ready')).resolves.toMatchObject({ activity: null });
+  });
+
   it("demande l'accord avant d'ajouter un pas, puis l'ajoute pour la personne", async () => {
     t.ai.willRespond(
       t.ai.toolCalls({
