@@ -210,6 +210,8 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Interactions conservées par Gemini** : 1 jour sur le palier gratuit, 55 jours sur le palier
   payant. Une conversation reprise après ce délai envoie un `previous_interaction_id` expiré ;
   le comportement de Gemini dans ce cas (et la reprise à prévoir) reste à vérifier.
+- **État de l'assistant** : retirer `value` et `lastError.step` quand plus aucune version installée
+  ne les lira. Les clients à jour lisent `activity` (`docs/adr/0005-activite-de-l-assistant.md`).
 - **Backlog d'Apex** encore ouvert : laisser filer (objectif, étape, pas), renommer les cas
   d'usage selon le métier (`DefineObjective`…), plusieurs instances du serveur (les
   acteurs XState vivent en mémoire d'un seul processus).

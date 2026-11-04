@@ -1,3 +1,4 @@
+import { WORKFLOW_ACTIVITY_STEPS } from '@org/ai-assistant';
 import { z } from 'zod';
 import { dateOutputSchema } from '../http/schemas';
 
@@ -19,11 +20,22 @@ const workflowValueSchema: z.ZodType<string | { [step: string]: unknown }> = z.u
   z.record(z.string(), z.unknown()),
 ]);
 
+const workflowActivityStepSchema = z.enum(WORKFLOW_ACTIVITY_STEPS);
+
 export const workflowStateResponseSchema = z.object({
   objectiveId: z.string(),
-  /** La valeur de la machine XState (`Ready For New Message`, `{ ExecutingAllTool: … }`…). */
+  /** Déprécié : la valeur de la machine XState. Les clients lisent `activity`. */
   value: workflowValueSchema,
   status: z.enum(['ready', 'processing', 'awaiting-permission']),
+  /** Ce que fait l'assistant pendant un tour ; null au repos. */
+  activity: z
+    .object({
+      step: workflowActivityStepSchema,
+      elapsedMs: z.number().int().nonnegative(),
+      round: z.number().int().nonnegative(),
+      done: z.array(workflowActivityStepSchema),
+    })
+    .nullable(),
   pendingToolCall: z
     .object({
       id: z.string(),

@@ -5,6 +5,7 @@ import {
   WORKFLOW_AWAITING_PERMISSION,
   WORKFLOW_READY_FOR_NEW_MESSAGE,
 } from '../model/workflow.model';
+import { initialWorkflowContext } from './machine';
 
 const messagesOf = (harness: ReturnType<typeof createWorkflowHarness>) =>
   [...harness.chat.db.messages.values()].map(({ sender, content }) => ({ sender, content }));
@@ -72,6 +73,7 @@ describe('SendMessageToAIWorkflow', () => {
           objectiveId: 'o1',
           value: WORKFLOW_READY_FOR_NEW_MESSAGE,
           status: 'ready',
+          activity: null,
           pendingToolCall: null,
           lastRegisteredMessage: null,
           lastError: null,
@@ -245,6 +247,259 @@ describe('SendMessageToAIWorkflow', () => {
       expect(first.toolCallResult.map((result) => result.id)).toEqual(['call-1']);
       expect(second.toolCallResult.map((result) => result.id)).toEqual(['call-2']);
       expect(second.interactionId).toBe('interaction-2');
+    });
+  });
+
+  describe("ce que fait l'assistant, dit aux clients", () => {
+    /** Une réponse de l'IA que le test donne quand il veut : le tour reste sur cette étape jusque-là. */
+    const heldAnswer = () => {
+      let answer: (response: AIInteractionResponse) => void = () => undefined;
+      const held = () => new Promise<AIInteractionResponse>((resolve) => (answer = resolve));
+      return { held, answer: (response: AIInteractionResponse) => answer(response) };
+    };
+
+    const activityOf = async (workflow: ReturnType<typeof createWorkflowHarness>['workflow']) => {
+      const state = await workflow.getState('o1', 'alice');
+      if (!state.success) throw new Error("l'état n'a pas pu être lu");
+      return state.data.activity;
+    };
+
+    const readObjective = { id: 'call-1', name: 'getObjectiveTree', arguments: { id: 'o1' } };
+    const addTask = {
+      id: 'call-1',
+      name: 'createTask',
+      arguments: { objectiveId: 'o1', title: 'Courir 5 km', importance: 4, urgency: 2 },
+    };
+
+    it("dit chaque étape d'un tour, même celles trop brèves pour une interrogation chaque seconde", async () => {
+      const { workflow, ai } = createWorkflowHarness();
+      const first = heldAnswer();
+      const second = heldAnswer();
+      ai.willRespond(first.held, second.held);
+
+      const sent = await workflow.sendMessage('o1', 'alice', 'Où en suis-je ?');
+      expect(sent).toMatchObject({
+        success: true,
+        data: { activity: { step: 'saving-message', round: 0, done: [] } },
+      });
+
+      await vi.waitFor(() => expect(ai.calls).toHaveLength(1));
+      await expect(activityOf(workflow)).resolves.toMatchObject({
+        step: 'thinking',
+        round: 1,
+        done: ['saving-message'],
+      });
+
+      first.answer(ai.toolCalls(readObjective));
+      await vi.waitFor(() => expect(ai.calls).toHaveLength(2));
+      await expect(activityOf(workflow)).resolves.toMatchObject({
+        step: 'reviewing',
+        round: 2,
+        done: ['saving-message', 'thinking', 'checking-permission', 'reading'],
+      });
+
+      second.answer(ai.text('Ton objectif est vide.'));
+      await expect(waitForStatus(workflow, 'ready')).resolves.toMatchObject({ activity: null });
+    });
+
+    it("compte chaque tour de boucle : un nouveau passage par l'IA après chaque série d'outils", async () => {
+      const { workflow, ai } = createWorkflowHarness();
+      const third = heldAnswer();
+      ai.willRespond(
+        ai.toolCalls(readObjective),
+        ai.toolCalls({ ...readObjective, id: 'call-2' }),
+        third.held,
+      );
+
+      await workflow.sendMessage('o1', 'alice', 'Regarde encore');
+      await vi.waitFor(() => expect(ai.calls).toHaveLength(3));
+
+      await expect(activityOf(workflow)).resolves.toMatchObject({
+        step: 'reviewing',
+        round: 3,
+        done: [
+          'saving-message',
+          'thinking',
+          'checking-permission',
+          'reading',
+          'reviewing',
+          'checking-permission',
+          'reading',
+        ],
+      });
+
+      third.answer(ai.text('Vu.'));
+      await waitForStatus(workflow, 'ready');
+    });
+
+    it("distingue l'attente d'un accord de l'écriture acceptée", async () => {
+      const { workflow, ai } = createWorkflowHarness();
+      const review = heldAnswer();
+      ai.willRespond(ai.toolCalls(addTask), review.held);
+
+      await workflow.sendMessage('o1', 'alice', 'Ajoute un pas');
+      await expect(waitForStatus(workflow, 'awaiting-permission')).resolves.toMatchObject({
+        activity: {
+          step: 'awaiting-permission',
+          round: 1,
+          done: ['saving-message', 'thinking', 'checking-permission'],
+        },
+      });
+
+      await expect(workflow.respondToPermission('o1', 'alice', true)).resolves.toMatchObject({
+        success: true,
+        data: { activity: { step: 'writing' } },
+      });
+
+      await vi.waitFor(() => expect(ai.calls).toHaveLength(2));
+      await expect(activityOf(workflow)).resolves.toMatchObject({
+        step: 'reviewing',
+        round: 2,
+        done: ['saving-message', 'thinking', 'checking-permission', 'awaiting-permission', 'writing'],
+      });
+
+      review.answer(ai.text('Ajouté.'));
+      await waitForStatus(workflow, 'ready');
+    });
+
+    it("mesure le temps passé sur l'étape en cours avec l'horloge du serveur", async () => {
+      const harness = createWorkflowHarness();
+      let time = Date.parse('2026-11-02T10:00:00.000Z');
+      harness.deps.now = () => new Date(time);
+      const workflow = harness.restart();
+      const { held, answer } = heldAnswer();
+      harness.ai.willRespond(held);
+
+      await workflow.sendMessage('o1', 'alice', 'Question');
+      await vi.waitFor(() => expect(harness.ai.calls).toHaveLength(1));
+
+      time += 42_000;
+
+      await expect(activityOf(workflow)).resolves.toMatchObject({ step: 'thinking', elapsedMs: 42_000 });
+
+      answer(harness.ai.text('Réponse.'));
+      await waitForStatus(workflow, 'ready');
+    });
+
+    it("garde l'écriture dans le journal quand l'outil la refuse : le journal dit ce qui a eu lieu", async () => {
+      const { workflow, ai, objectives } = createWorkflowHarness();
+      const review = heldAnswer();
+      const refused = { ...addTask, arguments: { ...addTask.arguments, importance: 99 } };
+      ai.willRespond(ai.toolCalls(refused), review.held);
+
+      await workflow.sendMessage('o1', 'alice', 'Ajoute un pas');
+      await waitForStatus(workflow, 'awaiting-permission');
+      await workflow.respondToPermission('o1', 'alice', true);
+      await vi.waitFor(() => expect(ai.calls).toHaveLength(2));
+
+      await expect(activityOf(workflow)).resolves.toMatchObject({
+        step: 'reviewing',
+        done: ['saving-message', 'thinking', 'checking-permission', 'awaiting-permission', 'writing'],
+      });
+      expect(objectives.db.tasks.size).toBe(0);
+
+      review.answer(ai.text("Je n'ai pas pu l'ajouter."));
+      await waitForStatus(workflow, 'ready');
+    });
+
+    it('ne nomme ni les outils, ni le modèle, ni les états de la machine', async () => {
+      const { workflow, ai } = createWorkflowHarness();
+      const { held, answer } = heldAnswer();
+      ai.willRespond(ai.toolCalls(readObjective), held);
+
+      await workflow.sendMessage('o1', 'alice', 'Regarde');
+      await vi.waitFor(() => expect(ai.calls).toHaveLength(2));
+
+      const activity = await activityOf(workflow);
+      expect(Object.keys(activity ?? {}).sort()).toEqual(['done', 'elapsedMs', 'round', 'step']);
+      expect(JSON.stringify(activity)).not.toMatch(
+        /getObjectiveTree|gemini|ExecutingAllTool|SendingCallResultToAI/i,
+      );
+
+      answer(ai.text('Vu.'));
+      await waitForStatus(workflow, 'ready');
+    });
+
+    it("n'a plus d'activité quand une panne arrête le tour, et repart de zéro au message suivant", async () => {
+      const { workflow, ai } = createWorkflowHarness();
+      ai.willRespond(ai.toolCalls(readObjective), new AIProviderError('quota'));
+
+      await workflow.sendMessage('o1', 'alice', 'Regarde');
+      await expect(waitForStatus(workflow, 'ready')).resolves.toMatchObject({
+        activity: null,
+        lastError: { code: 'AI_PROVIDER_FAILURE' },
+      });
+
+      await expect(workflow.sendMessage('o1', 'alice', 'Encore')).resolves.toMatchObject({
+        success: true,
+        data: { activity: { step: 'saving-message', round: 0, done: [] } },
+      });
+    });
+
+    it('garde son journal à travers un redémarrage', async () => {
+      const harness = createWorkflowHarness();
+      const { workflow, ai } = harness;
+      ai.willRespond(ai.toolCalls(addTask), ai.text('Ajouté.'));
+
+      await workflow.sendMessage('o1', 'alice', 'Ajoute un pas');
+      await waitForStatus(workflow, 'awaiting-permission');
+      await workflow.shutdown();
+
+      const restarted = harness.restart();
+
+      await expect(activityOf(restarted)).resolves.toMatchObject({
+        step: 'awaiting-permission',
+        round: 1,
+        done: ['saving-message', 'thinking', 'checking-permission'],
+      });
+      await restarted.respondToPermission('o1', 'alice', true);
+      await waitForStatus(restarted, 'ready');
+    });
+
+    it("n'a plus d'activité quand un tour persisté ne peut pas reprendre", async () => {
+      const harness = createWorkflowHarness();
+      const interrupted = {
+        ...initialWorkflowContext(),
+        userId: 'alice',
+        objectiveId: 'o1',
+        activity: [{ step: 'thinking' as const, at: '2026-11-02T10:00:00.000Z' }],
+      };
+      await harness.workflowStateRepository.overwrite({
+        id: 'o1',
+        value: 'SendingPromptToAI',
+        context: interrupted,
+      });
+
+      await expect(harness.workflow.getState('o1', 'alice')).resolves.toMatchObject({
+        success: true,
+        data: { status: 'ready', activity: null, lastError: { code: 'TURN_INTERRUPTED' } },
+      });
+    });
+
+    it("reprend un workflow persisté avant l'arrivée du journal", async () => {
+      const harness = createWorkflowHarness();
+      const { workflow, ai, workflowStateRepository, objectives } = harness;
+      ai.willRespond(ai.toolCalls(addTask), ai.text('Ajouté.'));
+
+      await workflow.sendMessage('o1', 'alice', 'Ajoute un pas');
+      await waitForStatus(workflow, 'awaiting-permission');
+      await workflow.shutdown();
+
+      const stored = await workflowStateRepository.findById('o1');
+      if (!stored) throw new Error('un état persisté était attendu');
+      delete stored.context.activity;
+      delete (stored.persistedSnapshot as { context: { activity?: unknown } }).context.activity;
+      await workflowStateRepository.overwrite(stored);
+
+      const restarted = harness.restart();
+      await expect(activityOf(restarted)).resolves.toBeNull();
+
+      await expect(restarted.respondToPermission('o1', 'alice', true)).resolves.toMatchObject({
+        success: true,
+        data: { activity: { step: 'writing', done: [] } },
+      });
+      await waitForStatus(restarted, 'ready');
+      expect(objectives.db.tasks.size).toBe(1);
     });
   });
 
