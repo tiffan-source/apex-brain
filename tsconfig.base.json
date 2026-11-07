@@ -28,6 +28,7 @@
       "@org/chore/testing": ["./libs/chore/src/testing.ts"],
       "@org/objective": ["./libs/objective/src/index.ts"],
       "@org/objective/testing": ["./libs/objective/src/testing.ts"],
+      "@org/objective/bff": ["./libs/objective/src/bff.ts"],
       "@org/auth": ["./libs/auth/src/index.ts"],
       "@org/auth/testing": ["./libs/auth/src/testing.ts"],
       "@org/chat": ["./libs/chat/src/index.ts"],

@@ -1,7 +1,9 @@
-import baseConfig from '../../eslint.config.mjs';
+import baseConfig, { allowBffImports } from '../../eslint.config.mjs';
 
 export default [
   ...baseConfig,
+  // L'app expose les lectures BFF aux clients.
+  allowBffImports,
   {
     files: ['**/*.ts'],
     rules: {

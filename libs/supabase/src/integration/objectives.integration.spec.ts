@@ -2,6 +2,7 @@ import { EditMyTaskUsecase, Objective, Task } from '@org/objective';
 import { SupabaseObjectiveRepository } from '../lib/objectives/repositories/objective.repository';
 import { SupabaseTaskRepository } from '../lib/objectives/repositories/task.repository';
 import { SupabaseGetAllObjectiveAndTaskQuery } from '../lib/objectives/queries/get-all-objective-and-tasks.query';
+import { SupabaseGetObjectiveTreeQuery } from '../lib/objectives/bff/get-objective-tree.query';
 import {
   createIntegrationAccess,
   createTestUser,
@@ -15,12 +16,14 @@ describe.skipIf(!integrationEnabled)('Supabase — objectifs et pas (intégratio
   let objectives: SupabaseObjectiveRepository;
   let tasks: SupabaseTaskRepository;
   let query: SupabaseGetAllObjectiveAndTaskQuery;
+  let tree: SupabaseGetObjectiveTreeQuery;
 
   beforeAll(async () => {
     const access = createIntegrationAccess();
     objectives = new SupabaseObjectiveRepository(access);
     tasks = new SupabaseTaskRepository(access);
     query = new SupabaseGetAllObjectiveAndTaskQuery(access);
+    tree = new SupabaseGetObjectiveTreeQuery(access);
     alice = (await createTestUser('alice')).id;
     mallory = (await createTestUser('mallory')).id;
   });
@@ -186,5 +189,33 @@ describe.skipIf(!integrationEnabled)('Supabase — objectifs et pas (intégratio
 
     const allTasks = await tasks.getAllUserTasks(alice);
     expect(allTasks.find((task) => task.id === todo.id)?.objectiveId).toBe(stage.id);
+  });
+
+  it("BFF : rend l'arbre de la personne, et seulement le sien, avec `done` tel qu'il est en base", async () => {
+    const { root, stage, done, todo } = await seedTree();
+    const malloryObjective = new Objective(testId('o'), 'Objectif de Mallory');
+    malloryObjective.addTask(new Task(testId('t'), 'Pas de Mallory', 3, 3));
+    await objectives.save(malloryObjective, mallory);
+
+    const aliceTree = await tree.execute({ ownerId: alice });
+    const node = aliceTree.objectives.find((objective) => objective.id === root.id);
+
+    expect(aliceTree.objectives.map((objective) => objective.id)).not.toContain(malloryObjective.id);
+    expect(aliceTree.objectives.map((objective) => objective.id)).not.toContain(stage.id);
+    expect(node).toMatchObject({
+      title: 'Courir un marathon',
+      why: 'Pour moi',
+      description: '',
+      done: false,
+    });
+    expect(node?.subObjectives.map((objective) => objective.id)).toEqual([stage.id]);
+    expect(node?.subObjectives[0].tasks).toEqual([
+      { id: done.id, title: 'Acheter des chaussures', importance: 2, urgency: 4, done: true },
+      { id: todo.id, title: 'Courir 5 km', importance: 4, urgency: 2, done: false },
+    ]);
+
+    const malloryTree = await tree.execute({ ownerId: mallory });
+    expect(malloryTree.objectives.map((objective) => objective.id)).toContain(malloryObjective.id);
+    expect(malloryTree.objectives.map((objective) => objective.id)).not.toContain(root.id);
   });
 });

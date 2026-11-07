@@ -1,3 +1,9 @@
+import { buildObjectiveTree } from '../bff/build-objective-tree';
+import {
+  GetObjectiveTreeInput,
+  GetObjectiveTreeOutput,
+  GetObjectiveTreeQuery,
+} from '../bff/get-objective-tree.query';
 import { Objective } from '../models/objective';
 import { Task } from '../models/task';
 import { ObjectiveRepository } from '../protocols/objective.repository';
@@ -266,7 +272,36 @@ export class InMemoryGetAllObjectiveAndTaskQuery extends GetAllObjectiveAndTaskQ
   }
 }
 
-/** Tout le nécessaire pour un test : la base et les trois adaptateurs qui la partagent. */
+/** Comme l'adaptateur Supabase du BFF : l'arbre de la personne, `done` tel qu'il est en base. */
+export class InMemoryGetObjectiveTreeQuery extends GetObjectiveTreeQuery {
+  constructor(private readonly db: InMemoryObjectiveDatabase) {
+    super();
+  }
+
+  async execute(input: GetObjectiveTreeInput): Promise<GetObjectiveTreeOutput> {
+    return buildObjectiveTree(
+      this.db.objectivesOf(input.ownerId).map((row) => ({
+        id: row.id,
+        title: row.title,
+        description: row.description ?? '',
+        why: row.why ?? '',
+        dueDate: row.dueDate,
+        done: row.done,
+        parentId: row.parentId,
+      })),
+      this.db.tasksOf(input.ownerId).map((row) => ({
+        id: row.id,
+        title: row.title,
+        importance: row.importance,
+        urgency: row.urgency,
+        done: row.done,
+        objectiveId: row.objectiveId,
+      })),
+    );
+  }
+}
+
+/** Tout le nécessaire pour un test : la base et les adaptateurs qui la partagent. */
 export function createInMemoryObjectiveInfrastructure() {
   const db = new InMemoryObjectiveDatabase();
   return {
@@ -274,6 +309,7 @@ export function createInMemoryObjectiveInfrastructure() {
     objectiveRepository: new InMemoryObjectiveRepository(db),
     taskRepository: new InMemoryTaskRepository(db),
     getAllObjectiveAndTaskQuery: new InMemoryGetAllObjectiveAndTaskQuery(db),
+    getObjectiveTreeQuery: new InMemoryGetObjectiveTreeQuery(db),
   };
 }
 
