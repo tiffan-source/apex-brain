@@ -7,12 +7,24 @@ import { apiErrorSchema } from './schemas';
 const isZodSchema = (schema: unknown): schema is z.ZodType =>
   (schema as { '~standard'?: { vendor?: string } })?.['~standard']?.vendor === 'zod';
 
+/**
+ * Les schémas nommés (`.meta({ id })`, nécessaires aux schémas récursifs comme l'arbre d'objectifs),
+ * rangés dans `components.schemas` du document : une référence en ligne ne se résoudrait pas.
+ */
+const namedSchemas: Record<string, unknown> = {};
+
 /** Un schéma zod en schéma OpenAPI 3.0 (pour les réponses, que Nest ne lit pas d'elles-mêmes). */
 export function openApiSchema(schema: z.ZodType, io: 'input' | 'output' = 'output') {
-  return z.toJSONSchema(schema, { target: 'openapi-3.0', io, unrepresentable: 'any' }) as Record<
+  const converted = z.toJSONSchema(schema, { target: 'openapi-3.0', io, unrepresentable: 'any' }) as Record<
     string,
     unknown
   >;
+  const { definitions, ...rest } = JSON.parse(
+    JSON.stringify(converted).replaceAll('"#/definitions/', '"#/components/schemas/'),
+  ) as Record<string, unknown> & { definitions?: Record<string, unknown> };
+
+  Object.assign(namedSchemas, definitions);
+  return rest;
 }
 
 export const openApiErrorSchema = () => openApiSchema(apiErrorSchema);
@@ -23,9 +35,11 @@ export function createOpenApiDocument(app: INestApplication) {
     .setTitle('Apex Brain')
     .setDescription(
       "L'API d'Apex : objectifs, étapes, pas, conversation et assistant. Les erreurs ont la forme " +
-        '`{ error: { code, message } }` ; le `code` est le contrat, le `message` est technique.',
+        '`{ error: { code, message } }` ; le `code` est le contrat, le `message` est technique. ' +
+        'La v2 sépare les commandes (un geste nommé chacune) des lectures pour les clients (tag `bff`) ; ' +
+        'les routes de la v1 marquées dépréciées disparaîtront quand les clients seront passés en v2.',
     )
-    .setVersion('1')
+    .setVersion('2')
     .addBearerAuth()
     .build();
 
@@ -34,7 +48,12 @@ export function createOpenApiDocument(app: INestApplication) {
       isZodSchema(schema) ? { schema: openApiSchema(schema, schemaType) } : undefined,
   };
 
-  return SwaggerModule.createDocument(app, config, options);
+  const document = SwaggerModule.createDocument(app, config, options);
+  document.components = {
+    ...document.components,
+    schemas: { ...document.components?.schemas, ...(namedSchemas as Record<string, object>) },
+  };
+  return document;
 }
 
 export function setupOpenApi(app: INestApplication): void {

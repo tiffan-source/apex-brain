@@ -37,8 +37,9 @@ export function configureApp(app: INestApplication, environment: Environment): v
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   });
 
-  // Toutes les routes sous /v1 (sauf /health) : une version 2 pourra coexister avec les clients existants.
-  app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
+  // Toutes les routes sous /v1 et /v2 (sauf /health) : ce qui n'a pas changé est servi par les deux.
+  // Les objectifs et les pas ont leurs contrôleurs par version : la v1 gelée, la v2 en commandes et BFF.
+  app.enableVersioning({ type: VersioningType.URI, defaultVersion: ['1', '2'] });
 
   app.enableShutdownHooks();
 
