@@ -3,6 +3,7 @@ import { ObjectiveRepository } from '../protocols/objective.repository';
 import { Objective } from '../models/objective';
 import { ObjectiveNotFoundError } from '../errors/objective-not-found.error';
 import { FailToSaveObjectiveError } from '../errors/fail-to-save-objective.error';
+import { ObjectiveCommandOutput, toObjectiveCommandOutput } from '../mappers/command-output.mapper';
 
 export interface AddSubObjectiveInput {
   parentObjectiveId: string;
@@ -10,11 +11,9 @@ export interface AddSubObjectiveInput {
   ownerId: string;
 }
 
-export interface AddSubObjectiveOutput {
-  id: string;
-  title: string;
-}
+export type AddSubObjectiveOutput = ObjectiveCommandOutput;
 
+/** Ajouter une étape sous un objectif ou une étape. */
 export class AddSubObjectiveUsecase {
   constructor(
     private readonly objectiveRepository: ObjectiveRepository,
@@ -42,10 +41,7 @@ export class AddSubObjectiveUsecase {
           throw new FailToSaveObjectiveError(parentObjective.id);
         }
 
-        return {
-          id: subObjective.id,
-          title: subObjective.title,
-        };
+        return toObjectiveCommandOutput(subObjective);
       },
       [ObjectiveNotFoundError, FailToSaveObjectiveError],
       'Failed to add sub-objective',

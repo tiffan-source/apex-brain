@@ -1,4 +1,4 @@
-import { createInMemoryObjectiveInfrastructure, seedObjective, seedTask } from '../../testing';
+import { createInMemoryObjectiveInfrastructure, seedObjective, seedTask } from '../../../testing';
 import { UpdateDoneStatusOfTaskUsecase } from './update-done-status-of-task.usecase';
 
 describe('UpdateDoneStatusOfTaskUsecase', () => {

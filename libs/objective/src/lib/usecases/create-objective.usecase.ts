@@ -2,6 +2,7 @@ import { IdGenerator, Result, runWithResult } from '@org/chore';
 import { Objective } from '../models/objective';
 import { ObjectiveRepository } from '../protocols/objective.repository';
 import { FailToSaveObjectiveError } from '../errors/fail-to-save-objective.error';
+import { ObjectiveCommandOutput, toObjectiveCommandOutput } from '../mappers/command-output.mapper';
 
 export interface CreateObjectiveInput {
   title: string;
@@ -11,14 +12,9 @@ export interface CreateObjectiveInput {
   ownerId: string;
 }
 
-export interface CreateObjectiveOutput {
-  id: string;
-  title: string;
-  description?: string;
-  why?: string;
-  dueDate?: Date;
-}
+export type CreateObjectiveOutput = ObjectiveCommandOutput;
 
+/** Définir un nouvel objectif principal. */
 export class CreateObjectiveUsecase {
   constructor(
     private readonly repository: ObjectiveRepository,
@@ -49,13 +45,7 @@ export class CreateObjectiveUsecase {
           throw new FailToSaveObjectiveError(id);
         }
 
-        return {
-          id: newObjective.id,
-          title: newObjective.title,
-          description: newObjective.description,
-          why: newObjective.why,
-          dueDate: newObjective.dueDate,
-        };
+        return toObjectiveCommandOutput(newObjective);
       },
       [FailToSaveObjectiveError],
       'Failed to create objective',

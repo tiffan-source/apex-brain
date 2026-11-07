@@ -1,8 +1,8 @@
 import { Result, runWithResult } from '@org/chore';
-import { ObjectiveRepository } from '../protocols/objective.repository';
-import { TaskNotFoundError } from '../errors/task-not-found.error';
-import { ObjectiveNotFoundError } from '../errors/objective-not-found.error';
-import { FailToSaveObjectiveError } from '../errors/fail-to-save-objective.error';
+import { ObjectiveRepository } from '../../protocols/objective.repository';
+import { TaskNotFoundError } from '../../errors/task-not-found.error';
+import { ObjectiveNotFoundError } from '../../errors/objective-not-found.error';
+import { FailToSaveObjectiveError } from '../../errors/fail-to-save-objective.error';
 
 export interface EditMyTaskInput {
   task: {

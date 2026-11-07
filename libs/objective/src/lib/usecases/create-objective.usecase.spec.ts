@@ -29,6 +29,8 @@ describe('CreateObjectiveUsecase', () => {
         description: 'Le marathon de Paris',
         why: 'Me prouver que je peux',
         dueDate,
+        parentObjectiveId: null,
+        done: false,
       },
     });
     expect(db.objectives.get('obj-1')).toMatchObject({ ownerId: 'alice', parentId: null, done: false });

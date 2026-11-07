@@ -3,6 +3,7 @@ import { ObjectiveRepository } from '../protocols/objective.repository';
 import { Task } from '../models/task';
 import { ObjectiveNotFoundError } from '../errors/objective-not-found.error';
 import { FailToSaveObjectiveError } from '../errors/fail-to-save-objective.error';
+import { TaskCommandOutput, toTaskCommandOutput } from '../mappers/command-output.mapper';
 
 export interface AddTaskToObjectiveInput {
   /** L'objectif ou l'étape qui reçoit le pas. */
@@ -13,13 +14,9 @@ export interface AddTaskToObjectiveInput {
   ownerId: string;
 }
 
-export interface AddTaskToObjectiveOutput {
-  id: string;
-  title: string;
-  importance: number;
-  urgency: number;
-}
+export type AddTaskToObjectiveOutput = TaskCommandOutput;
 
+/** Ajouter un pas à un objectif ou à une étape. */
 export class AddTaskToObjectiveUsecase {
   constructor(
     private readonly repository: ObjectiveRepository,
@@ -44,12 +41,7 @@ export class AddTaskToObjectiveUsecase {
           throw new FailToSaveObjectiveError(objective.id);
         }
 
-        return {
-          id: newTask.id,
-          title: newTask.title,
-          importance: newTask.importance,
-          urgency: newTask.urgency,
-        };
+        return toTaskCommandOutput(newTask, objective.id);
       },
       [ObjectiveNotFoundError, FailToSaveObjectiveError],
       'Failed to add task to objective',
