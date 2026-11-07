@@ -24,27 +24,27 @@ describe('Plateforme HTTP (e2e)', () => {
     const document = response.body;
     expect(Object.keys(document.paths)).toEqual(
       expect.arrayContaining([
-        '/v1/auth/register',
-        '/v1/auth/login',
-        '/v1/auth/refresh',
-        '/v1/auth/logout',
-        '/v1/auth/me',
-        '/v1/objectives',
-        '/v1/objectives/{objectiveId}',
-        '/v1/objectives/{objectiveId}/sub-objectives',
-        '/v1/objectives/{objectiveId}/tasks',
-        '/v1/tasks/today-focus',
-        '/v1/tasks/{taskId}',
-        '/v1/tasks/{taskId}/done',
-        '/v1/objectives/{objectiveId}/conversation',
-        '/v1/objectives/{objectiveId}/assistant',
-        '/v1/objectives/{objectiveId}/assistant/messages',
-        '/v1/objectives/{objectiveId}/assistant/permission',
+        '/v2/auth/register',
+        '/v2/auth/login',
+        '/v2/auth/refresh',
+        '/v2/auth/logout',
+        '/v2/auth/me',
+        '/v2/objectives',
+        '/v2/objectives/{objectiveId}',
+        '/v2/objectives/{objectiveId}/sub-objectives',
+        '/v2/objectives/{objectiveId}/tasks',
+        '/v2/tasks/today-focus',
+        '/v2/tasks/{taskId}',
+        '/v2/bff/objective-tree',
+        '/v2/objectives/{objectiveId}/conversation',
+        '/v2/objectives/{objectiveId}/assistant',
+        '/v2/objectives/{objectiveId}/assistant/messages',
+        '/v2/objectives/{objectiveId}/assistant/permission',
         '/health',
       ]),
     );
 
-    const createObjective = document.paths['/v1/objectives'].post;
+    const createObjective = document.paths['/v2/objectives'].post;
     const requestSchema = createObjective.requestBody.content['application/json'].schema;
     expect(requestSchema.required).toEqual(['title']);
     expect(Object.keys(requestSchema.properties)).toEqual(['title', 'description', 'why', 'dueDate']);
@@ -53,7 +53,7 @@ describe('Plateforme HTTP (e2e)', () => {
     );
     expect(document.components.securitySchemes).toHaveProperty('bearer');
 
-    for (const path of ['/v1/objectives/{objectiveId}', '/v1/tasks/{taskId}']) {
+    for (const path of ['/v2/objectives/{objectiveId}', '/v2/tasks/{taskId}']) {
       expect(Object.keys(document.paths[path].delete.responses)).toEqual(['204', '404']);
     }
   });
@@ -77,13 +77,18 @@ describe('Plateforme HTTP (e2e)', () => {
     t = await createTestApp();
     const { authorization } = t.signIn('alice@apex.test');
 
-    const unknownRoute = await t.http().get('/v1/inconnu').set('Authorization', authorization);
+    const unknownRoute = await t.http().get('/v2/inconnu').set('Authorization', authorization);
     expect(unknownRoute.status).toBe(404);
     expect(unknownRoute.body.error.code).toBe('NOT_FOUND');
 
+    // La v1 est retirée (ADR 0007) : ses routes n'existent plus.
+    const removed = await t.http().get('/v1/auth/me').set('Authorization', authorization);
+    expect(removed.status).toBe(404);
+    expect(removed.body.error.code).toBe('NOT_FOUND');
+
     const malformed = await t
       .http()
-      .post('/v1/objectives')
+      .post('/v2/objectives')
       .set('Authorization', authorization)
       .set('Content-Type', 'application/json')
       .send('{"title": ');
@@ -94,11 +99,11 @@ describe('Plateforme HTTP (e2e)', () => {
   it("cache le détail d'une panne inattendue", async () => {
     t = await createTestApp();
     const { authorization } = t.signIn('alice@apex.test');
-    vi.spyOn(t.objectives.getAllObjectiveAndTaskQuery, 'execute').mockRejectedValueOnce(
+    vi.spyOn(t.objectives.getObjectiveTreeQuery, 'execute').mockRejectedValueOnce(
       new Error('relation "objectives" does not exist (host db.internal:5432)'),
     );
 
-    const response = await t.http().get('/v1/objectives').set('Authorization', authorization);
+    const response = await t.http().get('/v2/bff/objective-tree').set('Authorization', authorization);
 
     expect(response.status).toBe(500);
     expect(response.body).toEqual({
@@ -109,7 +114,7 @@ describe('Plateforme HTTP (e2e)', () => {
   it('limite les tentatives de connexion', async () => {
     t = await createTestApp({ THROTTLE_AUTH_LIMIT: '2' });
     const attempt = () =>
-      t.http().post('/v1/auth/login').send({ email: 'alice@apex.test', password: 'faux' });
+      t.http().post('/v2/auth/login').send({ email: 'alice@apex.test', password: 'faux' });
 
     expect((await attempt()).status).toBe(401);
     expect((await attempt()).status).toBe(401);
@@ -124,7 +129,7 @@ describe('Plateforme HTTP (e2e)', () => {
 
     const response = await t
       .http()
-      .options('/v1/objectives')
+      .options('/v2/objectives')
       .set('Origin', 'http://localhost:4200')
       .set('Access-Control-Request-Method', 'POST');
 
@@ -134,14 +139,14 @@ describe('Plateforme HTTP (e2e)', () => {
 
     const deletion = await t
       .http()
-      .options('/v1/tasks/t1')
+      .options('/v2/tasks/t1')
       .set('Origin', 'http://localhost:4200')
       .set('Access-Control-Request-Method', 'DELETE');
     expect(deletion.headers['access-control-allow-methods']).toContain('DELETE');
 
     const foreign = await t
       .http()
-      .options('/v1/objectives')
+      .options('/v2/objectives')
       .set('Origin', 'https://ailleurs.example')
       .set('Access-Control-Request-Method', 'POST');
     expect(foreign.headers['access-control-allow-origin']).toBeUndefined();

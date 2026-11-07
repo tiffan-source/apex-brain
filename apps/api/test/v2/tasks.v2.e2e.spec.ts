@@ -112,11 +112,43 @@ describe('v2 — commandes sur un pas (e2e)', () => {
     });
   });
 
-  it('supprime un pas (deleteTask)', async () => {
-    const response = await t.http().delete('/v2/tasks/t1').set('Authorization', alice.authorization);
+  it('supprime un pas sans toucher à ses voisins, puis répond 404 (deleteTask)', async () => {
+    seedTask(t.objectives.db, { id: 't2', ownerId: alice.id, objectiveId: 's1', done: true });
+    const remove = () => t.http().delete('/v2/tasks/t1').set('Authorization', alice.authorization);
+
+    const response = await remove();
 
     expect(response.status).toBe(204);
-    expect(t.objectives.db.tasks.has('t1')).toBe(false);
+    expect(response.body).toEqual({});
+    expect([...t.objectives.db.tasks.keys()]).toEqual(['t2']);
+    expect(t.objectives.db.objectives.has('s1')).toBe(true);
+
+    const again = await remove();
+    expect(again.status).toBe(404);
+    expect(again.body.error.code).toBe('TASK_NOT_FOUND');
+  });
+
+  it('répond 500 sans détail technique quand la base est en panne', async () => {
+    t.objectives.db.failWrites = true;
+
+    const response = await t.http().delete('/v2/tasks/t1').set('Authorization', alice.authorization);
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({
+      error: { code: 'UNKNOWN_ERROR', message: 'An unexpected error occurred' },
+    });
+    expect(t.objectives.db.tasks.has('t1')).toBe(true);
+  });
+
+  it('déplace un pas sans toucher à ses voisins (moveTask)', async () => {
+    seedObjective(t.objectives.db, { id: 's2', ownerId: alice.id, parentId: 'o1' });
+    seedTask(t.objectives.db, { id: 't2', ownerId: alice.id, objectiveId: 's1', done: true });
+
+    const response = await patch(alice, '/v2/tasks/t1/move', { objectiveId: 's2' });
+
+    expect(response.status).toBe(200);
+    expect(t.objectives.db.tasks.get('t1')).toMatchObject({ objectiveId: 's2', title: 'Courir 5 km' });
+    expect(t.objectives.db.tasks.get('t2')).toMatchObject({ objectiveId: 's1', done: true });
   });
 
   it('donne le focus du jour (whatIsTodayFocus)', async () => {

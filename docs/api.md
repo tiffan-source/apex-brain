@@ -5,19 +5,17 @@ générer un client typé). Ce document-ci en donne la vue d'ensemble et les rè
 
 ## Règles communes
 
-- **Versions** : toutes les routes sont sous `/v2` et `/v1`, sauf `/health`. Les routes qui n'ont pas
-  changé (authentification, conversation, assistant) répondent sous les deux préfixes. Pour les
-  objectifs et les pas, la v2 sépare les **commandes** (un geste nommé chacune) des **lectures BFF**
-  (tag `bff`) ; la v1 est gelée et dépréciée, et disparaîtra quand les clients seront passés en v2
-  ([ADR 0006](./adr/0006-commandes-et-bff.md)). Les tableaux ci-dessous écrivent `/v1` pour les
-  routes communes : `/v2` y répond de la même façon.
+- **Versions** : toutes les routes sont sous `/v2`, sauf `/health`. Pour les objectifs et les pas,
+  la v2 sépare les **commandes** (un geste nommé chacune) des **lectures BFF** (tag `bff`)
+  ([ADR 0006](./adr/0006-commandes-et-bff.md)). La v1 a été retirée : `/v1/…` répond
+  `404 NOT_FOUND` ([ADR 0007](./adr/0007-retrait-de-la-v1.md)).
 - **Authentification** : `Authorization: Bearer <accessToken>` sur toute route sauf
-  `/v*/auth/register`, `/v*/auth/login`, `/v*/auth/refresh` et `/health`.
+  `/v2/auth/register`, `/v2/auth/login`, `/v2/auth/refresh` et `/health`.
 - **Corps** : JSON. Les dates en entrée acceptent `2027-04-01` ou un instant ISO 8601 ; en sortie,
   ce sont des instants ISO 8601 (`2027-04-01T00:00:00.000Z`).
 - **Réponses** : le corps d'une réponse réussie est la sortie du cas d'usage, telle quelle (mêmes
-  noms de champs que dans Apex). En v1, un champ facultatif absent n'est pas renvoyé ; les commandes
-  v2 rendent toujours l'entité entière (`null` ou `""` pour ce qui est vide).
+  noms de champs que dans Apex). Les commandes rendent toujours l'entité entière (`null` ou `""`
+  pour ce qui est vide).
 - **Propriété** : on ne voit et ne modifie que ce qui nous appartient. Un élément d'une autre
   personne répond `404`, comme un élément qui n'existe pas.
 - **Limitation de débit** : par personne connectée (sinon par adresse IP), sur une minute
@@ -49,11 +47,11 @@ Le **code** est le contrat : le client choisit sa phrase d'après lui. Le **mess
 
 | Méthode et route | Cas d'usage | Corps | Réponse |
 |---|---|---|---|
-| `POST /v1/auth/register` | `CreateNewUserUseCase` | `{ email, password }` | `201 { user, session \| null }` |
-| `POST /v1/auth/login` | `LogUserInUseCase` | `{ email, password }` | `200 { user, session }` |
-| `POST /v1/auth/refresh` | `RefreshSessionUseCase` | `{ refreshToken }` | `200 { user, session }` |
-| `POST /v1/auth/logout` | `LogUserOutUseCase` | — | `204` |
-| `GET /v1/auth/me` | `GetCurrentUserUseCase` | — | `200 { id, name, email }` |
+| `POST /v2/auth/register` | `CreateNewUserUseCase` | `{ email, password }` | `201 { user, session \| null }` |
+| `POST /v2/auth/login` | `LogUserInUseCase` | `{ email, password }` | `200 { user, session }` |
+| `POST /v2/auth/refresh` | `RefreshSessionUseCase` | `{ refreshToken }` | `200 { user, session }` |
+| `POST /v2/auth/logout` | `LogUserOutUseCase` | — | `204` |
+| `GET /v2/auth/me` | `GetCurrentUserUseCase` | — | `200 { id, name, email }` |
 
 `user` vaut `{ id, name, email }` (`name` : le nom d'affichage, à défaut l'e-mail) ; `session`
 vaut `{ accessToken, refreshToken, expiresAt }`. `session` est `null` à l'inscription tant que
@@ -96,6 +94,13 @@ cache sans tout relire :
   l'objectif qui porte déjà le pas. Un client peut la rejouer après une coupure.
 - `moveTask` déplace le pas vers une autre étape, un objectif, un ancêtre ; un objectif d'une autre
   personne répond `404 OBJECTIVE_NOT_FOUND`.
+- `deleteObjective` vaut pour un objectif comme pour une étape, et emporte tout ce qui en dépend :
+  ses étapes, leurs pas et, pour un objectif principal, sa conversation, ses messages et son
+  assistant (arrêté même en plein tour). Supprimer une étape ne touche ni à son objectif, ni à sa
+  conversation. La suppression est définitive : il n'y a pas de corbeille.
+- Supprimer un élément déjà supprimé (double appui, nouvel essai après une coupure) répond `404` :
+  le client peut le traiter comme un succès.
+- `importance` et `urgency` vont de 1 à 5 (à partir de 3 : important, urgent).
 - `whatIsTodayFocus` reste un cas d'usage : il porte la règle de priorité du jour.
 - `done` d'une `ObjectiveEntity` est celui de la base (voir plus bas).
 
@@ -114,56 +119,18 @@ l'infrastructure implémente directement.
 - **`done` d'un objectif ou d'une étape est lu tel qu'il est en base, sans calcul.** Rien ne tient
   la colonne à jour pour l'instant : elle vaut `false` à la création et y reste, même quand tous les
   pas sont faits. C'est assumé ([ADR 0006](./adr/0006-commandes-et-bff.md)). Le `done` des pas est juste.
-- Les listes n'ont pas d'ordre de sens : elles sont triées par création, puis par id, pour un
-  affichage stable.
-
-## Objectifs, étapes et pas (v1, gelée et dépréciée)
-
-Servis tels quels pour les clients qui ne sont pas encore passés en v2 ; marqués `deprecated` dans
-OpenAPI.
-
-| Méthode et route | Cas d'usage | Corps | Réponse |
-|---|---|---|---|
-| `GET /v1/objectives` | `GetMyObjectivesUsecase` | — | `200 { objectives: ObjectiveOutput[], tasks: TaskOutput[] }` |
-| `POST /v1/objectives` | `CreateObjectiveUsecase` | `{ title, description?, why?, dueDate? }` | `201 { id, title, description?, why?, dueDate? }` |
-| `PATCH /v1/objectives/{objectiveId}` | `EditObjectiveUsecase` | `{ title, description?, why?, dueDate? }` | `200` (même forme) |
-| `POST /v1/objectives/{objectiveId}/sub-objectives` | `AddSubObjectiveUsecase` | `{ title }` | `201 { id, title }` |
-| `POST /v1/objectives/{objectiveId}/tasks` | `AddTaskToObjectiveUsecase` | `{ title, importance, urgency }` | `201 { id, title, importance, urgency }` |
-| `PATCH /v1/tasks/{taskId}` | `EditMyTaskUsecase` | `{ title, objectiveId, importance, urgency }` | `200 { id, title, objectiveId, importance, urgency }` |
-| `PUT /v1/tasks/{taskId}/done` | `UpdateDoneStatusOfTaskUsecase` | `{ done }` | `200 { id, title, done }` |
-| `DELETE /v1/objectives/{objectiveId}` | `DeleteObjectiveUsecase` | — | `204` |
-| `DELETE /v1/tasks/{taskId}` | `DeleteTaskUsecase` | — | `204` |
-| `GET /v1/tasks/today-focus` | `WhatIsTodayFocusUsecase` | — | `200 [{ id, title, objectiveId, important, urgent, dueDate?, done }]` |
-
-- `ObjectiveOutput` : `{ id, title, description, why, dueDate | null, parentObjective | null, done }` ;
-  `TaskOutput` : `{ id, title, importance, urgency, done, objectiveId }`.
-- `done` d'un objectif ou d'une étape : fait ou non fait, rien d'autre. Il vaut `true` quand il a au
-  moins un pas et que tous sont faits, ceux de ses sous-objectifs compris. C'est le serveur qui
-  le décide : les clients l'affichent sans le calculer, et relisent `GET /v1/objectives` après une
-  écriture qui peut le changer (cocher, ajouter ou déplacer un pas).
 - Les étapes d'un objectif n'ont aucun ordre, les pas d'une étape non plus : ils sont indépendants,
-  aucun n'en attend un autre. Les listes restent triées par création, puis par id, pour que
-  l'affichage ne saute pas d'une lecture à l'autre : ce tri ne porte aucun sens.
-- `PATCH /v1/objectives/{id}` : un champ absent reste inchangé ; `dueDate: null` retire l'échéance.
-  Vaut pour un objectif comme pour une étape.
-- `PATCH /v1/tasks/{id}` : changer `objectiveId` déplace le pas (vers une étape, un objectif,
-  un ancêtre).
-- `DELETE /v1/objectives/{id}` : vaut pour un objectif comme pour une étape, et emporte tout ce qui
-  en dépend : ses étapes, leurs pas et, pour un objectif principal, sa conversation, ses messages
-  et son assistant (arrêté même en plein tour). Supprimer une étape ne touche ni à son objectif, ni
-  à sa conversation. La suppression est définitive : il n'y a pas de corbeille.
-- Supprimer un élément déjà supprimé (double appui, nouvel essai après une coupure) répond `404` :
-  le client peut le traiter comme un succès.
-- `importance` et `urgency` vont de 1 à 5 (à partir de 3 : important, urgent).
+  aucun n'en attend un autre. Les listes sont triées par création, puis par id, pour que l'affichage
+  ne saute pas d'une lecture à l'autre : ce tri ne porte aucun sens.
 
 ## Conversation et assistant
 
 | Méthode et route | Capacité | Corps | Réponse |
 |---|---|---|---|
-| `GET /v1/objectives/{objectiveId}/conversation` | `GetConversationsQuery` | — | `200 { id, messages: [{ id, sender, content, createdAt }] }` |
-| `GET /v1/objectives/{objectiveId}/assistant` | `startWorkFlow` + `getState` | — | `200 WorkflowState` |
-| `POST /v1/objectives/{objectiveId}/assistant/messages` | `sendMessage` | `{ message }` | `202 WorkflowState` |
-| `POST /v1/objectives/{objectiveId}/assistant/permission` | `respondToPermission` | `{ granted, toolCallId? }` | `202 WorkflowState` |
+| `GET /v2/objectives/{objectiveId}/conversation` | `GetConversationsQuery` | — | `200 { id, messages: [{ id, sender, content, createdAt }] }` |
+| `GET /v2/objectives/{objectiveId}/assistant` | `startWorkFlow` + `getState` | — | `200 WorkflowState` |
+| `POST /v2/objectives/{objectiveId}/assistant/messages` | `sendMessage` | `{ message }` | `202 WorkflowState` |
+| `POST /v2/objectives/{objectiveId}/assistant/permission` | `respondToPermission` | `{ granted, toolCallId? }` | `202 WorkflowState` |
 
 Seul un objectif principal a une conversation (une étape, ou un objectif supprimé, répond
 `404 CONVERSATION_NOT_FOUND`).
@@ -219,7 +186,7 @@ Un tour se déroule ainsi :
 3. Si Akari veut ajouter une étape (`createSubObjective`) ou un pas (`createTask`) :
    `status: awaiting-permission`, `pendingToolCall` décrit la proposition. Le client répond par
    `POST …/assistant/permission` avec `granted` et le `toolCallId` reçu, puis reprend
-   l'interrogation. Après un ajout accepté, recharger `GET /v1/objectives`.
+   l'interrogation. Après un ajout accepté, recharger `GET /v2/bff/objective-tree`.
 4. Une panne (IA indisponible…) ramène à `ready` avec `lastError` : le message de la personne est
    enregistré, elle peut réessayer. `lastError` disparaît au message suivant.
 

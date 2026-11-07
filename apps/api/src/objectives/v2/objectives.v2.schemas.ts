@@ -8,8 +8,8 @@ import {
   titleSchema,
 } from '../../http/schemas';
 
-// Les corps de création (`createObjectiveSchema`, `addSubObjectiveSchema`, `addTaskSchema`) sont ceux
-// de la v1 : ils n'ont pas changé.
+// Les corps de création (`createObjectiveSchema`, `addSubObjectiveSchema`, `addTaskSchema`) et le focus
+// du jour sont dans `../objectives.schemas.ts`.
 
 // #region requêtes
 

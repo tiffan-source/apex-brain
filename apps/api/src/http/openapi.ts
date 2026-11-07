@@ -36,8 +36,7 @@ export function createOpenApiDocument(app: INestApplication) {
     .setDescription(
       "L'API d'Apex : objectifs, étapes, pas, conversation et assistant. Les erreurs ont la forme " +
         '`{ error: { code, message } }` ; le `code` est le contrat, le `message` est technique. ' +
-        'La v2 sépare les commandes (un geste nommé chacune) des lectures pour les clients (tag `bff`) ; ' +
-        'les routes de la v1 marquées dépréciées disparaîtront quand les clients seront passés en v2.',
+        'La v2 sépare les commandes (un geste nommé chacune) des lectures pour les clients (tag `bff`).',
     )
     .setVersion('2')
     .addBearerAuth()

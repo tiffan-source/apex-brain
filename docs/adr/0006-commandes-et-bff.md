@@ -1,6 +1,7 @@
 # ADR 0006 — Des commandes nommées d'un côté, des lectures BFF de l'autre
 
-- Statut : accepté
+- Statut : accepté ; paragraphe « Versions » remplacé par l'[ADR 0007](./0007-retrait-de-la-v1.md)
+  (la v1 est retirée)
 - Date : 2026-11-07
 
 ## Contexte

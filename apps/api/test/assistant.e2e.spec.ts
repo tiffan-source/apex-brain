@@ -17,7 +17,7 @@ describe('Conversation et assistant (e2e)', () => {
     mallory = t.signIn('mallory@apex.test');
     const created = await t
       .http()
-      .post('/v1/objectives')
+      .post('/v2/objectives')
       .set('Authorization', alice.authorization)
       .send({ title: 'Courir un marathon' });
     objectiveId = created.body.id;
@@ -28,7 +28,7 @@ describe('Conversation et assistant (e2e)', () => {
   const state = async (who = alice) => {
     const response = await t
       .http()
-      .get(`/v1/objectives/${objectiveId}/assistant`)
+      .get(`/v2/objectives/${objectiveId}/assistant`)
       .set('Authorization', who.authorization);
     expect(response.status).toBe(200);
     return workflowStateResponseSchema.parse(response.body);
@@ -47,14 +47,14 @@ describe('Conversation et assistant (e2e)', () => {
   const send = (message: string, who = alice) =>
     t
       .http()
-      .post(`/v1/objectives/${objectiveId}/assistant/messages`)
+      .post(`/v2/objectives/${objectiveId}/assistant/messages`)
       .set('Authorization', who.authorization)
       .send({ message });
 
   it("ouvre la conversation de l'objectif, vide au départ (GetConversationsQuery)", async () => {
     const response = await t
       .http()
-      .get(`/v1/objectives/${objectiveId}/conversation`)
+      .get(`/v2/objectives/${objectiveId}/conversation`)
       .set('Authorization', alice.authorization);
 
     expect(response.status).toBe(200);
@@ -83,7 +83,7 @@ describe('Conversation et assistant (e2e)', () => {
       (
         await t
           .http()
-          .get(`/v1/objectives/${objectiveId}/conversation`)
+          .get(`/v2/objectives/${objectiveId}/conversation`)
           .set('Authorization', alice.authorization)
       ).body,
     );
@@ -137,7 +137,7 @@ describe('Conversation et assistant (e2e)', () => {
 
     const stale = await t
       .http()
-      .post(`/v1/objectives/${objectiveId}/assistant/permission`)
+      .post(`/v2/objectives/${objectiveId}/assistant/permission`)
       .set('Authorization', alice.authorization)
       .send({ granted: true, toolCallId: 'call-ancien' });
     expect(stale.status).toBe(409);
@@ -149,14 +149,13 @@ describe('Conversation et assistant (e2e)', () => {
 
     const granted = await t
       .http()
-      .post(`/v1/objectives/${objectiveId}/assistant/permission`)
+      .post(`/v2/objectives/${objectiveId}/assistant/permission`)
       .set('Authorization', alice.authorization)
       .send({ granted: true, toolCallId: 'call-1' });
     expect(granted.status).toBe(202);
 
     await waitFor('ready');
-    const objectives = await t.http().get('/v1/objectives').set('Authorization', alice.authorization);
-    expect(objectives.body.tasks).toEqual([
+    expect([...t.objectives.db.tasks.values()]).toEqual([
       expect.objectContaining({ title: 'Courir 5 km', objectiveId, importance: 4, urgency: 2, done: false }),
     ]);
   });
@@ -186,21 +185,21 @@ describe('Conversation et assistant (e2e)', () => {
   it("n'ouvre la conversation et l'assistant qu'à la propriétaire de l'objectif principal", async () => {
     const stage = await t
       .http()
-      .post(`/v1/objectives/${objectiveId}/sub-objectives`)
+      .post(`/v2/objectives/${objectiveId}/sub-objectives`)
       .set('Authorization', alice.authorization)
       .send({ title: 'Étape' });
 
     const attempts = [
-      t.http().get(`/v1/objectives/${objectiveId}/conversation`).set('Authorization', mallory.authorization),
-      t.http().get(`/v1/objectives/${objectiveId}/assistant`).set('Authorization', mallory.authorization),
+      t.http().get(`/v2/objectives/${objectiveId}/conversation`).set('Authorization', mallory.authorization),
+      t.http().get(`/v2/objectives/${objectiveId}/assistant`).set('Authorization', mallory.authorization),
       send('Coucou', mallory),
       t
         .http()
-        .post(`/v1/objectives/${objectiveId}/assistant/permission`)
+        .post(`/v2/objectives/${objectiveId}/assistant/permission`)
         .set('Authorization', mallory.authorization)
         .send({ granted: true }),
       // Une étape n'a pas de conversation : seul l'objectif principal en a une.
-      t.http().get(`/v1/objectives/${stage.body.id}/conversation`).set('Authorization', alice.authorization),
+      t.http().get(`/v2/objectives/${stage.body.id}/conversation`).set('Authorization', alice.authorization),
     ];
 
     for (const response of await Promise.all(attempts)) {
@@ -211,7 +210,7 @@ describe('Conversation et assistant (e2e)', () => {
 
   describe("suppression de l'objectif", () => {
     const remove = (id = objectiveId) =>
-      t.http().delete(`/v1/objectives/${id}`).set('Authorization', alice.authorization);
+      t.http().delete(`/v2/objectives/${id}`).set('Authorization', alice.authorization);
 
     it("emporte la conversation et met fin à l'assistant, même quand il attend un accord", async () => {
       t.ai.willRespond(
@@ -233,12 +232,12 @@ describe('Conversation et assistant (e2e)', () => {
       await expect(t.workflowStates.findById(objectiveId)).resolves.toBeNull();
 
       const afterwards = await Promise.all([
-        t.http().get(`/v1/objectives/${objectiveId}/conversation`).set('Authorization', alice.authorization),
-        t.http().get(`/v1/objectives/${objectiveId}/assistant`).set('Authorization', alice.authorization),
+        t.http().get(`/v2/objectives/${objectiveId}/conversation`).set('Authorization', alice.authorization),
+        t.http().get(`/v2/objectives/${objectiveId}/assistant`).set('Authorization', alice.authorization),
         send('Tu es encore là ?'),
         t
           .http()
-          .post(`/v1/objectives/${objectiveId}/assistant/permission`)
+          .post(`/v2/objectives/${objectiveId}/assistant/permission`)
           .set('Authorization', alice.authorization)
           .send({ granted: true, toolCallId: 'call-1' }),
       ]);
@@ -253,7 +252,7 @@ describe('Conversation et assistant (e2e)', () => {
     it("garde la conversation et l'assistant de l'objectif quand on supprime une de ses étapes", async () => {
       const stage = await t
         .http()
-        .post(`/v1/objectives/${objectiveId}/sub-objectives`)
+        .post(`/v2/objectives/${objectiveId}/sub-objectives`)
         .set('Authorization', alice.authorization)
         .send({ title: 'Préparer le corps' });
       t.ai.willRespond(t.ai.text('Commence doucement.'));
@@ -276,7 +275,7 @@ describe('Conversation et assistant (e2e)', () => {
 
       const stolen = await t
         .http()
-        .delete(`/v1/objectives/${objectiveId}`)
+        .delete(`/v2/objectives/${objectiveId}`)
         .set('Authorization', mallory.authorization);
 
       expect(stolen.status).toBe(404);
@@ -306,14 +305,14 @@ describe('Conversation et assistant (e2e)', () => {
 
     const noDecision = await t
       .http()
-      .post(`/v1/objectives/${objectiveId}/assistant/permission`)
+      .post(`/v2/objectives/${objectiveId}/assistant/permission`)
       .set('Authorization', alice.authorization)
       .send({});
     expect(noDecision.status).toBe(400);
 
     const nothingPending = await t
       .http()
-      .post(`/v1/objectives/${objectiveId}/assistant/permission`)
+      .post(`/v2/objectives/${objectiveId}/assistant/permission`)
       .set('Authorization', alice.authorization)
       .send({ granted: false });
     expect(nothingPending.status).toBe(409);

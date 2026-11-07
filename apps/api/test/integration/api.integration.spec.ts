@@ -7,6 +7,7 @@ import { ProductionAdaptersModule } from '../../src/adapters/production-adapters
 import { AppModule } from '../../src/app.module';
 import { loadEnvironment } from '../../src/config/environment';
 import { configureApp } from '../../src/configure-app';
+import type { ObjectiveTreeNodeResponse } from '../../src/objectives/bff/objective-tree.schemas';
 
 const enabled = process.env['SUPABASE_INTEGRATION'] === '1';
 
@@ -48,9 +49,21 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
 
   const http = () => request(app.getHttpServer());
 
+  /** L'arbre BFF de la personne. */
+  const tree = async (who: { authorization: string }): Promise<{ objectives: ObjectiveTreeNodeResponse[] }> =>
+    (await http().get('/v2/bff/objective-tree').set('Authorization', who.authorization)).body;
+
+  /** Les titres de l'arbre, en profondeur : l'objectif, ses étapes, puis ses pas. */
+  const titles = ({ objectives }: { objectives: ObjectiveTreeNodeResponse[] }): string[] =>
+    objectives.flatMap((node) => [
+      node.title,
+      ...titles({ objectives: node.subObjectives }),
+      ...node.tasks.map((task) => task.title),
+    ]);
+
   const register = async (label: string) => {
     const email = `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}@apex.test`;
-    const response = await http().post('/v1/auth/register').send({ email, password: 'secret-123456' });
+    const response = await http().post('/v2/auth/register').send({ email, password: 'secret-123456' });
     expect(response.status).toBe(201);
     return {
       id: response.body.user.id as string,
@@ -63,7 +76,7 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
   const waitForStatus = async (objectiveId: string, authorization: string, status: string) => {
     for (let attempt = 0; attempt < 100; attempt++) {
       const response = await http()
-        .get(`/v1/objectives/${objectiveId}/assistant`)
+        .get(`/v2/objectives/${objectiveId}/assistant`)
         .set('Authorization', authorization);
       if (response.body.status === status) return response.body;
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -78,66 +91,81 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
 
     // Objectif, étape, pas
     const objective = await http()
-      .post('/v1/objectives')
+      .post('/v2/objectives')
       .set(as(alice))
       .send({ title: 'Courir un marathon', dueDate: '2027-04-01' });
     expect(objective.status).toBe(201);
     const objectiveId = objective.body.id as string;
 
     const stage = await http()
-      .post(`/v1/objectives/${objectiveId}/sub-objectives`)
+      .post(`/v2/objectives/${objectiveId}/sub-objectives`)
       .set(as(alice))
       .send({ title: 'Préparer le corps' });
     expect(stage.status).toBe(201);
 
     const first = await http()
-      .post(`/v1/objectives/${stage.body.id}/tasks`)
+      .post(`/v2/objectives/${stage.body.id}/tasks`)
       .set(as(alice))
       .send({ title: 'Courir 5 km', importance: 4, urgency: 2 });
     const second = await http()
-      .post(`/v1/objectives/${stage.body.id}/tasks`)
+      .post(`/v2/objectives/${stage.body.id}/tasks`)
       .set(as(alice))
       .send({ title: 'Étirements', importance: 3, urgency: 3 });
     expect([first.status, second.status]).toEqual([201, 201]);
 
-    // Cocher, modifier, déplacer
+    // Faire, renommer, revoir la priorité, déplacer
+    expect((await http().patch(`/v2/tasks/${first.body.id}/complete`).set(as(alice))).status).toBe(200);
     expect(
-      (await http().put(`/v1/tasks/${first.body.id}/done`).set(as(alice)).send({ done: true })).status,
+      (
+        await http()
+          .patch(`/v2/tasks/${second.body.id}/rename`)
+          .set(as(alice))
+          .send({ title: 'Étirements du soir' })
+      ).status,
     ).toBe(200);
-    const moved = await http()
-      .patch(`/v1/tasks/${second.body.id}`)
-      .set(as(alice))
-      .send({ title: 'Étirements du soir', objectiveId, importance: 3, urgency: 4 });
-    expect(moved.status).toBe(200);
+    expect(
+      (
+        await http()
+          .patch(`/v2/tasks/${second.body.id}/reprioritize`)
+          .set(as(alice))
+          .send({ importance: 3, urgency: 4 })
+      ).status,
+    ).toBe(200);
+    const moved = await http().patch(`/v2/tasks/${second.body.id}/move`).set(as(alice)).send({ objectiveId });
+    expect(moved.body).toMatchObject({ id: second.body.id, objectiveId });
 
-    const edited = await http()
-      .patch(`/v1/objectives/${objectiveId}`)
+    const renamed = await http()
+      .patch(`/v2/objectives/${objectiveId}/rename`)
       .set(as(alice))
-      .send({ title: 'Courir le marathon de Paris', dueDate: null });
-    expect(edited.body).toEqual({ id: objectiveId, title: 'Courir le marathon de Paris' });
+      .send({ title: 'Courir le marathon de Paris' });
+    expect(renamed.body).toMatchObject({ id: objectiveId, title: 'Courir le marathon de Paris' });
+    const withoutDeadline = await http()
+      .patch(`/v2/objectives/${objectiveId}/remove-deadline`)
+      .set(as(alice));
+    expect(withoutDeadline.body).toMatchObject({ id: objectiveId, dueDate: null });
 
-    const list = await http().get('/v1/objectives').set(as(alice));
-    expect(list.body.objectives.map((row: { id: string }) => row.id)).toEqual([objectiveId, stage.body.id]);
-    expect(list.body.tasks).toEqual([
-      expect.objectContaining({ id: first.body.id, done: true, objectiveId: stage.body.id }),
-      expect.objectContaining({ id: second.body.id, title: 'Étirements du soir', objectiveId, done: false }),
+    const [root] = (await tree(alice)).objectives;
+    expect(root).toMatchObject({ id: objectiveId, title: 'Courir le marathon de Paris' });
+    expect(root.subObjectives.map((sub) => sub.id)).toEqual([stage.body.id]);
+    expect(root.subObjectives[0].tasks).toEqual([expect.objectContaining({ id: first.body.id, done: true })]);
+    expect(root.tasks).toEqual([
+      expect.objectContaining({ id: second.body.id, title: 'Étirements du soir', done: false }),
     ]);
 
-    const focus = await http().get('/v1/tasks/today-focus').set(as(alice));
+    const focus = await http().get('/v2/tasks/today-focus').set(as(alice));
     expect(focus.body.map((task: { id: string }) => task.id)).toEqual([second.body.id, first.body.id]);
 
     // Isolation
-    expect((await http().get('/v1/objectives').set(as(mallory))).body).toEqual({ objectives: [], tasks: [] });
+    expect(await tree(mallory)).toEqual({ objectives: [] });
     expect(
-      (await http().patch(`/v1/objectives/${objectiveId}`).set(as(mallory)).send({ title: 'Volé' })).status,
+      (await http().patch(`/v2/objectives/${objectiveId}/rename`).set(as(mallory)).send({ title: 'Volé' }))
+        .status,
     ).toBe(404);
-    expect(
-      (await http().put(`/v1/tasks/${first.body.id}/done`).set(as(mallory)).send({ done: false })).status,
-    ).toBe(404);
-    expect((await http().get(`/v1/objectives/${objectiveId}/conversation`).set(as(mallory))).status).toBe(
+    expect((await http().patch(`/v2/tasks/${first.body.id}/reopen`).set(as(mallory))).status).toBe(404);
+    expect((await http().get(`/v2/objectives/${objectiveId}/conversation`).set(as(mallory))).status).toBe(
       404,
     );
-    expect((await http().get(`/v1/objectives/${objectiveId}/assistant`).set(as(mallory))).status).toBe(404);
+    expect((await http().get(`/v2/objectives/${objectiveId}/assistant`).set(as(mallory))).status).toBe(404);
 
     // L'assistant : lecture de l'arbre, puis ajout d'un pas avec l'accord d'Alice
     ai.willRespond(
@@ -153,7 +181,7 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
     expect(
       (
         await http()
-          .post(`/v1/objectives/${objectiveId}/assistant/messages`)
+          .post(`/v2/objectives/${objectiveId}/assistant/messages`)
           .set(as(alice))
           .send({ message: 'Que faire ensuite ?' })
       ).status,
@@ -164,7 +192,7 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
     expect(
       (
         await http()
-          .post(`/v1/objectives/${objectiveId}/assistant/permission`)
+          .post(`/v2/objectives/${objectiveId}/assistant/permission`)
           .set(as(alice))
           .send({ granted: true, toolCallId: 'call-2' })
       ).status,
@@ -175,41 +203,37 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
       content: 'Je te propose un fractionné, il est ajouté.',
     });
 
-    const conversation = await http().get(`/v1/objectives/${objectiveId}/conversation`).set(as(alice));
+    const conversation = await http().get(`/v2/objectives/${objectiveId}/conversation`).set(as(alice));
     expect(conversation.body.messages.map((message: { sender: string }) => message.sender)).toEqual([
       alice.id,
       'AI',
     ]);
 
-    const afterAssistant = await http().get('/v1/objectives').set(as(alice));
-    expect(afterAssistant.body.tasks.map((task: { title: string }) => task.title)).toContain('Fractionné');
+    expect(titles(await tree(alice))).toContain('Fractionné');
 
     // Session : renouveler, se déconnecter
-    const refreshed = await http().post('/v1/auth/refresh').send({ refreshToken: alice.refreshToken });
+    const refreshed = await http().post('/v2/auth/refresh').send({ refreshToken: alice.refreshToken });
     expect(refreshed.status).toBe(200);
     const renewed = `Bearer ${refreshed.body.session.accessToken}`;
-    expect((await http().get('/v1/auth/me').set('Authorization', renewed)).body.email).toBe(alice.email);
-    expect((await http().post('/v1/auth/logout').set('Authorization', renewed)).status).toBe(204);
+    expect((await http().get('/v2/auth/me').set('Authorization', renewed)).body.email).toBe(alice.email);
+    expect((await http().post('/v2/auth/logout').set('Authorization', renewed)).status).toBe(204);
   });
 
   it('supprime un pas, une étape puis un objectif et sa conversation, au nom de sa propriétaire seulement', async () => {
     const alice = await register('alice');
     const mallory = await register('mallory');
     const as = (who: { authorization: string }) => ({ Authorization: who.authorization });
-    const titles = async () => {
-      const { objectives, tasks } = (await http().get('/v1/objectives').set(as(alice))).body;
-      return [...objectives, ...tasks].map((row: { title: string }) => row.title);
-    };
+    const aliceTitles = async () => titles(await tree(alice));
 
-    const objectiveId = (await http().post('/v1/objectives').set(as(alice)).send({ title: 'Objectif' })).body
+    const objectiveId = (await http().post('/v2/objectives').set(as(alice)).send({ title: 'Objectif' })).body
       .id as string;
     const stage = await http()
-      .post(`/v1/objectives/${objectiveId}/sub-objectives`)
+      .post(`/v2/objectives/${objectiveId}/sub-objectives`)
       .set(as(alice))
       .send({ title: 'Étape' });
     const addTask = (holderId: string, title: string) =>
       http()
-        .post(`/v1/objectives/${holderId}/tasks`)
+        .post(`/v2/objectives/${holderId}/tasks`)
         .set(as(alice))
         .send({ title, importance: 3, urgency: 3 });
     const first = await addTask(stage.body.id, 'Premier pas');
@@ -218,16 +242,16 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
 
     ai.willRespond(ai.text('Bonjour.'));
     await http()
-      .post(`/v1/objectives/${objectiveId}/assistant/messages`)
+      .post(`/v2/objectives/${objectiveId}/assistant/messages`)
       .set(as(alice))
       .send({ message: 'Salut' });
     await waitForStatus(objectiveId, alice.authorization, 'ready');
 
     // Rien ne bouge au nom de quelqu'un d'autre
-    expect((await http().delete(`/v1/tasks/${first.body.id}`).set(as(mallory))).status).toBe(404);
-    expect((await http().delete(`/v1/objectives/${stage.body.id}`).set(as(mallory))).status).toBe(404);
-    expect((await http().delete(`/v1/objectives/${objectiveId}`).set(as(mallory))).status).toBe(404);
-    await expect(titles()).resolves.toEqual([
+    expect((await http().delete(`/v2/tasks/${first.body.id}`).set(as(mallory))).status).toBe(404);
+    expect((await http().delete(`/v2/objectives/${stage.body.id}`).set(as(mallory))).status).toBe(404);
+    expect((await http().delete(`/v2/objectives/${objectiveId}`).set(as(mallory))).status).toBe(404);
+    await expect(aliceTitles()).resolves.toEqual([
       'Objectif',
       'Étape',
       'Premier pas',
@@ -236,18 +260,18 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
     ]);
 
     // Un pas, puis une étape et ce qu'elle porte
-    expect((await http().delete(`/v1/tasks/${first.body.id}`).set(as(alice))).status).toBe(204);
-    await expect(titles()).resolves.toEqual(['Objectif', 'Étape', 'Deuxième pas', 'Pas sur l’objectif']);
+    expect((await http().delete(`/v2/tasks/${first.body.id}`).set(as(alice))).status).toBe(204);
+    await expect(aliceTitles()).resolves.toEqual(['Objectif', 'Étape', 'Deuxième pas', 'Pas sur l’objectif']);
 
-    expect((await http().delete(`/v1/objectives/${stage.body.id}`).set(as(alice))).status).toBe(204);
-    await expect(titles()).resolves.toEqual(['Objectif', 'Pas sur l’objectif']);
-    expect((await http().get(`/v1/objectives/${objectiveId}/conversation`).set(as(alice))).status).toBe(200);
+    expect((await http().delete(`/v2/objectives/${stage.body.id}`).set(as(alice))).status).toBe(204);
+    await expect(aliceTitles()).resolves.toEqual(['Objectif', 'Pas sur l’objectif']);
+    expect((await http().get(`/v2/objectives/${objectiveId}/conversation`).set(as(alice))).status).toBe(200);
 
     // L'objectif, sa conversation et son assistant
-    expect((await http().delete(`/v1/objectives/${objectiveId}`).set(as(alice))).status).toBe(204);
-    await expect(titles()).resolves.toEqual([]);
-    expect((await http().get(`/v1/objectives/${objectiveId}/conversation`).set(as(alice))).status).toBe(404);
-    expect((await http().get(`/v1/objectives/${objectiveId}/assistant`).set(as(alice))).status).toBe(404);
-    expect((await http().delete(`/v1/objectives/${objectiveId}`).set(as(alice))).status).toBe(404);
+    expect((await http().delete(`/v2/objectives/${objectiveId}`).set(as(alice))).status).toBe(204);
+    await expect(aliceTitles()).resolves.toEqual([]);
+    expect((await http().get(`/v2/objectives/${objectiveId}/conversation`).set(as(alice))).status).toBe(404);
+    expect((await http().get(`/v2/objectives/${objectiveId}/assistant`).set(as(alice))).status).toBe(404);
+    expect((await http().delete(`/v2/objectives/${objectiveId}`).set(as(alice))).status).toBe(404);
   });
 });

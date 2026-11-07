@@ -169,4 +169,110 @@ describe('v2 — commandes sur un objectif ou une étape (e2e)', () => {
       expect((await as(alice).delete('/v2/objectives/o1')).status).toBe(404);
     });
   });
+
+  describe('suppression (deleteObjective)', () => {
+    /** Alice : `o1` avec les étapes `s1` (qui porte `s2`) et `s3`, et un autre objectif `o2`. */
+    const seedTree = () => {
+      const { db } = t.objectives;
+      seedObjective(db, { id: 'o1', ownerId: alice.id });
+      seedObjective(db, { id: 's1', ownerId: alice.id, parentId: 'o1' });
+      seedObjective(db, { id: 's2', ownerId: alice.id, parentId: 's1' });
+      seedObjective(db, { id: 's3', ownerId: alice.id, parentId: 'o1' });
+      seedObjective(db, { id: 'o2', ownerId: alice.id });
+      seedTask(db, { id: 't1', ownerId: alice.id, objectiveId: 's1' });
+      seedTask(db, { id: 't2', ownerId: alice.id, objectiveId: 's2' });
+      seedTask(db, { id: 't3', ownerId: alice.id, objectiveId: 's3' });
+      seedTask(db, { id: 't4', ownerId: alice.id, objectiveId: 'o2' });
+    };
+
+    const remaining = () => ({
+      objectives: [...t.objectives.db.objectives.keys()],
+      tasks: [...t.objectives.db.tasks.keys()],
+    });
+
+    it("supprime une étape avec ce qu'elle porte, sans toucher à son objectif ni à ses voisines", async () => {
+      seedTree();
+
+      const response = await as(alice).delete('/v2/objectives/s1');
+
+      expect(response.status).toBe(204);
+      expect(response.body).toEqual({});
+      expect(remaining()).toEqual({ objectives: ['o1', 's3', 'o2'], tasks: ['t3', 't4'] });
+    });
+
+    it('répond 404 pour un objectif inconnu ou déjà supprimé', async () => {
+      seedTree();
+      expect((await as(alice).delete('/v2/objectives/o1')).status).toBe(204);
+      expect(remaining()).toEqual({ objectives: ['o2'], tasks: ['t4'] });
+
+      for (const id of ['o1', 's1', 'inconnu']) {
+        const response = await as(alice).delete(`/v2/objectives/${id}`);
+        expect(response.status).toBe(404);
+        expect(response.body.error.code).toBe('OBJECTIVE_NOT_FOUND');
+      }
+    });
+
+    it('demande un jeton', async () => {
+      seedTree();
+
+      expect((await t.http().delete('/v2/objectives/o1')).status).toBe(401);
+      expect(remaining().objectives).toEqual(['o1', 's1', 's2', 's3', 'o2']);
+    });
+
+    it('répond 500 sans détail technique quand la base est en panne', async () => {
+      seedTree();
+      t.objectives.db.failWrites = true;
+
+      const response = await as(alice).delete('/v2/objectives/o1');
+
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({
+        error: { code: 'UNKNOWN_ERROR', message: 'An unexpected error occurred' },
+      });
+      expect(t.objectives.db.objectives.has('o1')).toBe(true);
+    });
+  });
+
+  it('valide les corps de création', async () => {
+    seedObjective(t.objectives.db, { id: 'o1', ownerId: alice.id });
+
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      ['/v2/objectives', { title: '   ' }, 'title'],
+      ['/v2/objectives', { title: 'X', dueDate: 'demain' }, 'dueDate'],
+      ['/v2/objectives/o1/tasks', { title: 'X', importance: 7, urgency: 1 }, 'importance'],
+      ['/v2/objectives/o1/tasks', { title: 'X', importance: 3 }, 'urgency'],
+    ];
+
+    for (const [url, body, path] of cases) {
+      const response = await as(alice).post(url, body);
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe('VALIDATION_ERROR');
+      expect(response.body.error.details.map((detail: { path: string }) => detail.path)).toContain(path);
+    }
+  });
+
+  it("n'ajoute rien sous l'objectif d'une autre personne (OBJECTIVE_NOT_FOUND)", async () => {
+    seedObjective(t.objectives.db, { id: 'o1', ownerId: alice.id });
+
+    const attempts = [
+      as(mallory).post('/v2/objectives/o1/sub-objectives', { title: 'Intrusion' }),
+      as(mallory).post('/v2/objectives/o1/tasks', { title: 'Intrusion', importance: 1, urgency: 1 }),
+    ];
+
+    for (const response of await Promise.all(attempts)) {
+      expect(response.status).toBe(404);
+      expect(response.body.error.code).toBe('OBJECTIVE_NOT_FOUND');
+    }
+    expect([...t.objectives.db.objectives.keys()]).toEqual(['o1']);
+    expect(t.objectives.db.tasks.size).toBe(0);
+  });
+
+  it("répond 500 sans détail technique quand l'enregistrement échoue", async () => {
+    t.objectives.db.failWrites = true;
+
+    const response = await as(alice).post('/v2/objectives', { title: 'X' });
+
+    expect(response.status).toBe(500);
+    expect(response.body.error.code).toBe('FAIL_TO_SAVE_OBJECTIVE');
+  });
 });

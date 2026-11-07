@@ -10,7 +10,7 @@ import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { createInMemoryChatInfrastructure } from '@org/chat/testing';
 import { IdGenerator } from '@org/chore';
 import { SequentialIdGenerator } from '@org/chore/testing';
-import { GetAllObjectiveAndTaskQuery, ObjectiveRepository, TaskRepository } from '@org/objective';
+import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import { createInMemoryObjectiveInfrastructure } from '@org/objective/testing';
 import request from 'supertest';
@@ -62,7 +62,6 @@ export async function createTestApp(environmentOverrides: Record<string, string>
       { provide: IdGenerator, useValue: new SequentialIdGenerator('id') },
       { provide: ObjectiveRepository, useValue: objectives.objectiveRepository },
       { provide: TaskRepository, useValue: objectives.taskRepository },
-      { provide: GetAllObjectiveAndTaskQuery, useValue: objectives.getAllObjectiveAndTaskQuery },
       { provide: GetObjectiveTreeQuery, useValue: objectives.getObjectiveTreeQuery },
       { provide: AuthProvider, useValue: auth },
       { provide: GetConversationsQuery, useValue: chat.getConversationsQuery },

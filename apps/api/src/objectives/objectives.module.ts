@@ -9,10 +9,6 @@ import {
   CreateObjectiveUsecase,
   DeleteObjectiveUsecase,
   DeleteTaskUsecase,
-  EditMyTaskUsecase,
-  EditObjectiveUsecase,
-  GetAllObjectiveAndTaskQuery,
-  GetMyObjectivesUsecase,
   MoveTaskUsecase,
   ObjectiveRepository,
   RemoveObjectiveDeadlineUsecase,
@@ -22,13 +18,10 @@ import {
   ReprioritizeTaskUsecase,
   SetObjectiveDeadlineUsecase,
   TaskRepository,
-  UpdateDoneStatusOfTaskUsecase,
   WhatIsTodayFocusUsecase,
 } from '@org/objective';
 import { AssistantModule } from '../assistant/assistant.module';
 import { ObjectiveTreeController } from './bff/objective-tree.controller';
-import { ObjectivesController } from './objectives.controller';
-import { TasksController } from './tasks.controller';
 import { ObjectivesV2Controller } from './v2/objectives.v2.controller';
 import { TasksV2Controller } from './v2/tasks.v2.controller';
 
@@ -40,19 +33,13 @@ const onPort = <T, P>(
 ): Provider => ({ provide, useFactory: build, inject: [port] });
 
 /**
- * Le domaine objectif : ses commandes (v2), les anciens cas d'usage de la v1 gelée et la lecture BFF
- * de l'arbre, assemblés sur ses ports (fournis par les adaptateurs).
+ * Le domaine objectif : ses commandes et la lecture BFF de l'arbre, assemblées sur ses ports (fournis
+ * par les adaptateurs).
  */
 @Module({
   // Supprimer un objectif met fin à son assistant (voir `ObjectivesV2Controller.remove`).
   imports: [AssistantModule],
-  controllers: [
-    ObjectivesV2Controller,
-    TasksV2Controller,
-    ObjectiveTreeController,
-    ObjectivesController,
-    TasksController,
-  ],
+  controllers: [ObjectivesV2Controller, TasksV2Controller, ObjectiveTreeController],
   providers: [
     onPort(
       RenameObjectiveUsecase,
@@ -79,12 +66,6 @@ const onPort = <T, P>(
     onPort(ReprioritizeTaskUsecase, TaskRepository, (repository) => new ReprioritizeTaskUsecase(repository)),
     onPort(CompleteTaskUsecase, TaskRepository, (repository) => new CompleteTaskUsecase(repository)),
     onPort(ReopenTaskUsecase, TaskRepository, (repository) => new ReopenTaskUsecase(repository)),
-    // v1 seulement (gelée)
-    {
-      provide: GetMyObjectivesUsecase,
-      useFactory: (query: GetAllObjectiveAndTaskQuery) => new GetMyObjectivesUsecase(query),
-      inject: [GetAllObjectiveAndTaskQuery],
-    },
     {
       provide: CreateObjectiveUsecase,
       useFactory: (repository: ObjectiveRepository, ids: IdGenerator) =>
@@ -104,16 +85,6 @@ const onPort = <T, P>(
       inject: [ObjectiveRepository, IdGenerator],
     },
     {
-      provide: EditObjectiveUsecase,
-      useFactory: (repository: ObjectiveRepository) => new EditObjectiveUsecase(repository),
-      inject: [ObjectiveRepository],
-    },
-    {
-      provide: EditMyTaskUsecase,
-      useFactory: (repository: ObjectiveRepository) => new EditMyTaskUsecase(repository),
-      inject: [ObjectiveRepository],
-    },
-    {
       provide: DeleteObjectiveUsecase,
       useFactory: (repository: ObjectiveRepository) => new DeleteObjectiveUsecase(repository),
       inject: [ObjectiveRepository],
@@ -121,11 +92,6 @@ const onPort = <T, P>(
     {
       provide: DeleteTaskUsecase,
       useFactory: (repository: TaskRepository) => new DeleteTaskUsecase(repository),
-      inject: [TaskRepository],
-    },
-    {
-      provide: UpdateDoneStatusOfTaskUsecase,
-      useFactory: (repository: TaskRepository) => new UpdateDoneStatusOfTaskUsecase(repository),
       inject: [TaskRepository],
     },
     {

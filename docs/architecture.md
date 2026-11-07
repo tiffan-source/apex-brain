@@ -54,8 +54,7 @@ domaine, rien hors du dossier `bff/` ne les lit.
   un geste nommé (`RenameObjective`, `CompleteTask`…), jamais une modification générique ; il rend
   l'entité créée ou modifiée ([ADR 0006](./adr/0006-commandes-et-bff.md)). Ils rendent un
   `Result<T>` construit par `runWithResult` ; seules les erreurs du domaine listées deviennent
-  des échecs structurés, le reste devient `UNKNOWN_ERROR`. `usecases/legacy/` : les anciens cas
-  d'usage de la v1 gelée, à supprimer avec elle.
+  des échecs structurés, le reste devient `UNKNOWN_ERROR`.
 - **Lectures BFF** : `libs/<domaine>/src/lib/bff/*.query.ts`, exportées par `src/bff.ts`
   (`@org/<domaine>/bff`). Des ports pour les clients web et mobile, sans cas d'usage ni logique
   métier, implémentés directement par l'infrastructure et exposés sous `/v2/bff` (tag `bff`).

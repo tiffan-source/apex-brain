@@ -79,22 +79,4 @@ describe('ObjectiveMapper', () => {
     expect(rebuilt?.subObjectives.map((objective) => objective.id)).toEqual(['s2']);
     expect(rebuilt?.subObjectives[0].tasks.map((task) => task.id)).toEqual(['t1']);
   });
-
-  it('rend les lignes pour la query de chargement', () => {
-    expect(
-      ObjectiveMapper.toObjectiveOutput([objectiveRow({ id: 'o1', due_date: '2027-04-01T00:00:00.000Z' })]),
-    ).toEqual([
-      {
-        id: 'o1',
-        title: 'Objectif o1',
-        description: '',
-        why: '',
-        dueDate: new Date('2027-04-01T00:00:00.000Z'),
-        parentObjective: null,
-      },
-    ]);
-    expect(ObjectiveMapper.toTaskOutput([taskRow({ id: 't1', objective_id: 'o1', done: true })])).toEqual([
-      { id: 't1', title: 'Pas t1', importance: 3, urgency: 2, done: true, objectiveId: 'o1' },
-    ]);
-  });
 });

@@ -7,7 +7,6 @@ export * from './lib/objectives/mapper/objective.mapper';
 export * from './lib/objectives/mapper/task.mapper';
 export * from './lib/objectives/repositories/task.repository';
 export * from './lib/objectives/repositories/objective.repository';
-export * from './lib/objectives/queries/get-all-objective-and-tasks.query';
 export * from './lib/objectives/bff/get-objective-tree.query';
 
 // auth

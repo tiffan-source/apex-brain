@@ -1,7 +1,6 @@
-import { EditMyTaskUsecase, Objective, Task } from '@org/objective';
+import { MoveTaskUsecase, Objective, Task } from '@org/objective';
 import { SupabaseObjectiveRepository } from '../lib/objectives/repositories/objective.repository';
 import { SupabaseTaskRepository } from '../lib/objectives/repositories/task.repository';
-import { SupabaseGetAllObjectiveAndTaskQuery } from '../lib/objectives/queries/get-all-objective-and-tasks.query';
 import { SupabaseGetObjectiveTreeQuery } from '../lib/objectives/bff/get-objective-tree.query';
 import {
   createIntegrationAccess,
@@ -15,14 +14,12 @@ describe.skipIf(!integrationEnabled)('Supabase — objectifs et pas (intégratio
   let mallory: string;
   let objectives: SupabaseObjectiveRepository;
   let tasks: SupabaseTaskRepository;
-  let query: SupabaseGetAllObjectiveAndTaskQuery;
   let tree: SupabaseGetObjectiveTreeQuery;
 
   beforeAll(async () => {
     const access = createIntegrationAccess();
     objectives = new SupabaseObjectiveRepository(access);
     tasks = new SupabaseTaskRepository(access);
-    query = new SupabaseGetAllObjectiveAndTaskQuery(access);
     tree = new SupabaseGetObjectiveTreeQuery(access);
     alice = (await createTestUser('alice')).id;
     mallory = (await createTestUser('mallory')).id;
@@ -74,16 +71,18 @@ describe.skipIf(!integrationEnabled)('Supabase — objectifs et pas (intégratio
     await expect(objectives.findById(root.id, alice)).resolves.toMatchObject({ title: 'Courir un marathon' });
   });
 
-  it("recharge le pas et ses voisins complets, et l'édition d'un pas ne remet pas ses voisins à « non faits »", async () => {
-    const { stage, done, todo } = await seedTree();
+  it('recharge le pas et ses voisins complets, et déplacer un pas ne remet pas ses voisins à « non faits »', async () => {
+    const { root, stage, done, todo } = await seedTree();
 
     const holder = await objectives.findObjectiveWithASpecificTaskId(todo.id, alice);
     expect(holder?.id).toBe(stage.id);
     expect(holder?.getTaskById(done.id)).toMatchObject({ done: true, description: 'Chez le spécialiste' });
     await expect(objectives.findObjectiveWithASpecificTaskId(todo.id, mallory)).resolves.toBeNull();
 
-    const result = await new EditMyTaskUsecase(objectives).execute({
-      task: { id: todo.id, title: 'Courir 10 km', objectiveId: stage.id, importance: 5, urgency: 3 },
+    // Remonter le pas vers l'objectif : tout l'arbre de l'objectif est réenregistré, voisins compris.
+    const result = await new MoveTaskUsecase(objectives).execute({
+      taskId: todo.id,
+      objectiveId: root.id,
       ownerId: alice,
     });
 
@@ -93,8 +92,8 @@ describe.skipIf(!integrationEnabled)('Supabase — objectifs et pas (intégratio
       description: 'Chez le spécialiste',
     });
     await expect(tasks.findById(todo.id, alice)).resolves.toMatchObject({
-      title: 'Courir 10 km',
-      importance: 5,
+      title: 'Courir 5 km',
+      objectiveId: root.id,
     });
   });
 
@@ -166,26 +165,20 @@ describe.skipIf(!integrationEnabled)('Supabase — objectifs et pas (intégratio
     await expect(tasks.delete(todo.id, alice)).resolves.toBe(false);
   });
 
-  it('charge tout ce qui appartient à la personne, et seulement cela, dans un ordre stable', async () => {
-    const { root, stage, done, todo } = await seedTree();
-    const malloryObjective = new Objective(testId('o'), 'Objectif de Mallory');
-    await objectives.save(malloryObjective, mallory);
+  it('BFF : rend les pas dans un ordre stable, que les cocher ne change pas', async () => {
+    const { stage, done, todo } = await seedTree();
+    const stageTasks = async () => {
+      const { objectives: roots } = await tree.execute({ ownerId: alice });
+      const node = roots.flatMap((objective) => objective.subObjectives).find((sub) => sub.id === stage.id);
+      return node?.tasks.map((task) => task.id);
+    };
 
-    const first = await query.execute({ ownerId: alice });
-    const objectiveIds = first.objectives.map((objective) => objective.id);
+    expect(await stageTasks()).toEqual([done.id, todo.id]);
 
-    expect(objectiveIds).toEqual(expect.arrayContaining([root.id, stage.id]));
-    expect(objectiveIds).not.toContain(malloryObjective.id);
-    expect(first.objectives.find((objective) => objective.id === stage.id)?.parentObjective).toBe(root.id);
-    expect(first.tasks.filter((task) => [done.id, todo.id].includes(task.id)).map((task) => task.id)).toEqual(
-      [done.id, todo.id],
-    );
-
-    // Cocher un pas ne change plus l'ordre de lecture (dans Apex, la ligne passait en fin de liste).
+    // Cocher un pas ne change pas l'ordre de lecture (dans Apex, la ligne passait en fin de liste).
     const reloaded = (await tasks.findById(done.id, alice)) as Task;
     await tasks.update(reloaded.setDone(false) as Task, alice);
-    const second = await query.execute({ ownerId: alice });
-    expect(second.tasks.map((task) => task.id)).toEqual(first.tasks.map((task) => task.id));
+    expect(await stageTasks()).toEqual([done.id, todo.id]);
 
     const allTasks = await tasks.getAllUserTasks(alice);
     expect(allTasks.find((task) => task.id === todo.id)?.objectiveId).toBe(stage.id);
