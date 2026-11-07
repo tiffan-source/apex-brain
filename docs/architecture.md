@@ -43,13 +43,22 @@ l'application NestJS `apps/api`.
 | `type:infra` | `supabase`, `gemini`, `firebase` | `type:domain`, `type:workflow`, `type:kernel` | — |
 | `type:app` | `api` | tout | — |
 
-Les doublures de test (`@org/<lib>/testing`) ne peuvent être importées que par des tests.
+Les doublures de test (`@org/<lib>/testing`) ne peuvent être importées que par des tests. Les
+lectures BFF (`@org/<lib>/bff`) ne peuvent être importées que par l'infrastructure qui les
+implémente et par l'app qui les expose (`allowBffImports` dans leur `eslint.config.mjs`) ; dans un
+domaine, rien hors du dossier `bff/` ne les lit.
 
 ## Où vit quoi
 
-- **Cas d'usage** : `libs/<domaine>/src/lib/usecases/*.usecase.ts`. Ils rendent un
+- **Cas d'usage (commandes)** : `libs/<domaine>/src/lib/usecases/*.usecase.ts`. Un cas d'usage =
+  un geste nommé (`RenameObjective`, `CompleteTask`…), jamais une modification générique ; il rend
+  l'entité créée ou modifiée ([ADR 0006](./adr/0006-commandes-et-bff.md)). Ils rendent un
   `Result<T>` construit par `runWithResult` ; seules les erreurs du domaine listées deviennent
-  des échecs structurés, le reste devient `UNKNOWN_ERROR`.
+  des échecs structurés, le reste devient `UNKNOWN_ERROR`. `usecases/legacy/` : les anciens cas
+  d'usage de la v1 gelée, à supprimer avec elle.
+- **Lectures BFF** : `libs/<domaine>/src/lib/bff/*.query.ts`, exportées par `src/bff.ts`
+  (`@org/<domaine>/bff`). Des ports pour les clients web et mobile, sans cas d'usage ni logique
+  métier, implémentés directement par l'infrastructure et exposés sous `/v2/bff` (tag `bff`).
 - **Queries** : `libs/<domaine>/src/lib/queries/*.query.ts`, des ports sans logique métier (voir
   [`technical/queries.md`](./technical/queries.md)).
 - **Ports** : `protocols/*.ts` (repositories, fournisseurs). Chaque port reçoit le propriétaire
@@ -75,8 +84,11 @@ Les doublures de test (`@org/<lib>/testing`) ne peuvent être importées que par
    `PORTS` s'il s'agit d'un nouveau port), puis construire le cas d'usage dans le module du
    contexte avec `useFactory`/`inject`.
 5. **HTTP** : schémas zod de la requête et de la réponse dans `<contexte>.schemas.ts`, route dans
-   le contrôleur (`@Inject` explicite, `unwrap(await usecase.execute(...))`), statut HTTP des
-   nouveaux codes d'erreur dans `apps/api/src/http/api-error.ts`.
+   le contrôleur v2 (`@Inject` explicite, `unwrap(await usecase.execute(...))`), nommée comme la
+   commande : `@ApiOperation({ operationId: 'renameObjective' })` sur
+   `PATCH /v2/objectives/{id}/rename` (`PATCH` pour une modification, `POST` pour une création,
+   `DELETE` pour une suppression). Statut HTTP des nouveaux codes d'erreur dans
+   `apps/api/src/http/api-error.ts`.
 6. **Test e2e** : `apps/api/test/<contexte>.e2e.spec.ts`, y compris l'isolation entre deux personnes.
 7. **Contrat** : mettre à jour [`api.md`](./api.md).
 
