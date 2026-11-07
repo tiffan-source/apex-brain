@@ -5,13 +5,19 @@ générer un client typé). Ce document-ci en donne la vue d'ensemble et les rè
 
 ## Règles communes
 
-- **Versions** : toutes les routes sont sous `/v1`, sauf `/health`.
+- **Versions** : toutes les routes sont sous `/v2` et `/v1`, sauf `/health`. Les routes qui n'ont pas
+  changé (authentification, conversation, assistant) répondent sous les deux préfixes. Pour les
+  objectifs et les pas, la v2 sépare les **commandes** (un geste nommé chacune) des **lectures BFF**
+  (tag `bff`) ; la v1 est gelée et dépréciée, et disparaîtra quand les clients seront passés en v2
+  ([ADR 0006](./adr/0006-commandes-et-bff.md)). Les tableaux ci-dessous écrivent `/v1` pour les
+  routes communes : `/v2` y répond de la même façon.
 - **Authentification** : `Authorization: Bearer <accessToken>` sur toute route sauf
-  `/v1/auth/register`, `/v1/auth/login`, `/v1/auth/refresh` et `/health`.
+  `/v*/auth/register`, `/v*/auth/login`, `/v*/auth/refresh` et `/health`.
 - **Corps** : JSON. Les dates en entrée acceptent `2027-04-01` ou un instant ISO 8601 ; en sortie,
   ce sont des instants ISO 8601 (`2027-04-01T00:00:00.000Z`).
 - **Réponses** : le corps d'une réponse réussie est la sortie du cas d'usage, telle quelle (mêmes
-  noms de champs que dans Apex). Un champ facultatif absent n'est pas renvoyé.
+  noms de champs que dans Apex). En v1, un champ facultatif absent n'est pas renvoyé ; les commandes
+  v2 rendent toujours l'entité entière (`null` ou `""` pour ce qui est vide).
 - **Propriété** : on ne voit et ne modifie que ce qui nous appartient. Un élément d'une autre
   personne répond `404`, comme un élément qui n'existe pas.
 - **Limitation de débit** : par personne connectée (sinon par adresse IP), sur une minute
@@ -53,7 +59,68 @@ Le **code** est le contrat : le client choisit sa phrase d'après lui. Le **mess
 vaut `{ accessToken, refreshToken, expiresAt }`. `session` est `null` à l'inscription tant que
 l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt` ou sur un `401`.
 
-## Objectifs, étapes et pas
+## Objectifs, étapes et pas (v2)
+
+### Commandes
+
+Chaque commande porte une intention, et son `operationId` OpenAPI est son nom. Elle rend l'entité
+créée ou modifiée, entière mais sans ses enfants, pour que le client la remplace dans son arbre en
+cache sans tout relire :
+
+- `ObjectiveEntity` : `{ id, title, description, why, dueDate | null, parentObjectiveId | null, done }` ;
+- `TaskEntity` : `{ id, title, importance, urgency, done, objectiveId }`.
+
+| Méthode et route | `operationId` (cas d'usage) | Corps | Réponse |
+|---|---|---|---|
+| `POST /v2/objectives` | `createObjective` | `{ title, description?, why?, dueDate? }` | `201 ObjectiveEntity` |
+| `POST /v2/objectives/{objectiveId}/sub-objectives` | `addSubObjective` | `{ title }` | `201 ObjectiveEntity` |
+| `POST /v2/objectives/{objectiveId}/tasks` | `addTaskToObjective` | `{ title, importance, urgency }` | `201 TaskEntity` |
+| `PATCH /v2/objectives/{objectiveId}/rename` | `renameObjective` | `{ title }` | `200 ObjectiveEntity` |
+| `PATCH /v2/objectives/{objectiveId}/clarify` | `clarifyObjective` | `{ description?, why? }` (au moins un) | `200 ObjectiveEntity` |
+| `PATCH /v2/objectives/{objectiveId}/set-deadline` | `setObjectiveDeadline` | `{ dueDate }` | `200 ObjectiveEntity` |
+| `PATCH /v2/objectives/{objectiveId}/remove-deadline` | `removeObjectiveDeadline` | — | `200 ObjectiveEntity` |
+| `DELETE /v2/objectives/{objectiveId}` | `deleteObjective` | — | `204` |
+| `PATCH /v2/tasks/{taskId}/rename` | `renameTask` | `{ title }` | `200 TaskEntity` |
+| `PATCH /v2/tasks/{taskId}/reprioritize` | `reprioritizeTask` | `{ importance, urgency }` | `200 TaskEntity` |
+| `PATCH /v2/tasks/{taskId}/move` | `moveTask` | `{ objectiveId }` | `200 TaskEntity` |
+| `PATCH /v2/tasks/{taskId}/complete` | `completeTask` | — | `200 TaskEntity` |
+| `PATCH /v2/tasks/{taskId}/reopen` | `reopenTask` | — | `200 TaskEntity` |
+| `DELETE /v2/tasks/{taskId}` | `deleteTask` | — | `204` |
+| `GET /v2/tasks/today-focus` | `whatIsTodayFocus` | — | `200 [{ id, title, objectiveId, important, urgent, dueDate?, done }]` |
+
+- Les commandes sur un objectif valent aussi pour une étape.
+- `clarifyObjective` : un champ absent reste inchangé, `""` le vide ; `{}` répond
+  `400 VALIDATION_ERROR`.
+- Une commande sans effet réussit (`200` avec l'entité) : `completeTask` sur un pas fait,
+  `reopenTask` sur un pas à faire, `removeObjectiveDeadline` sans échéance, `moveTask` vers
+  l'objectif qui porte déjà le pas. Un client peut la rejouer après une coupure.
+- `moveTask` déplace le pas vers une autre étape, un objectif, un ancêtre ; un objectif d'une autre
+  personne répond `404 OBJECTIVE_NOT_FOUND`.
+- `whatIsTodayFocus` reste un cas d'usage : il porte la règle de priorité du jour.
+- `done` d'une `ObjectiveEntity` est celui de la base (voir plus bas).
+
+### Lectures BFF
+
+Des lectures taillées pour les clients d'Apex (web et mobile), sans logique métier : un port que
+l'infrastructure implémente directement.
+
+| Méthode et route | `operationId` | Réponse |
+|---|---|---|
+| `GET /v2/bff/objective-tree` | `getObjectiveTree` | `200 { objectives: ObjectiveTreeNode[] }` |
+
+- `ObjectiveTreeNode` : `{ id, title, description, why, dueDate | null, done, tasks: [{ id, title,
+  importance, urgency, done }], subObjectives: ObjectiveTreeNode[] }`. Seuls les objectifs principaux
+  sont à la racine ; les étapes sont emboîtées à toute profondeur.
+- **`done` d'un objectif ou d'une étape est lu tel qu'il est en base, sans calcul.** Rien ne tient
+  la colonne à jour pour l'instant : elle vaut `false` à la création et y reste, même quand tous les
+  pas sont faits. C'est assumé ([ADR 0006](./adr/0006-commandes-et-bff.md)). Le `done` des pas est juste.
+- Les listes n'ont pas d'ordre de sens : elles sont triées par création, puis par id, pour un
+  affichage stable.
+
+## Objectifs, étapes et pas (v1, gelée et dépréciée)
+
+Servis tels quels pour les clients qui ne sont pas encore passés en v2 ; marqués `deprecated` dans
+OpenAPI.
 
 | Méthode et route | Cas d'usage | Corps | Réponse |
 |---|---|---|---|

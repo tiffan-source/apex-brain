@@ -1,3 +1,4 @@
-import baseConfig from '../../eslint.config.mjs';
+import baseConfig, { allowBffImports } from '../../eslint.config.mjs';
 
-export default [...baseConfig];
+// L'infrastructure implémente les lectures BFF des domaines.
+export default [...baseConfig, allowBffImports];

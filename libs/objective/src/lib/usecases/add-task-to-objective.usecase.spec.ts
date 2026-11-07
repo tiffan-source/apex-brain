@@ -27,7 +27,7 @@ describe('AddTaskToObjectiveUsecase', () => {
 
     expect(result).toEqual({
       success: true,
-      data: { id: 'task-1', title: 'Courir 5 km', importance: 4, urgency: 2 },
+      data: { id: 'task-1', title: 'Courir 5 km', importance: 4, urgency: 2, done: false, objectiveId: 's1' },
     });
     expect(db.tasks.get('task-1')).toMatchObject({ objectiveId: 's1', ownerId: 'alice', done: false });
   });

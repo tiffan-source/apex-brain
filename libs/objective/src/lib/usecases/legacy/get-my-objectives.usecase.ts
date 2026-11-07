@@ -1,11 +1,11 @@
 import { Result, runWithResult } from '@org/chore';
-import { allTasksDone } from '../models/objective';
+import { allTasksDone } from '../../models/objective';
 import {
   GetAllObjectiveAndTaskInput,
   GetAllObjectiveAndTaskQuery,
   ObjectiveOutput,
   TaskOutput,
-} from '../queries/get-all-objectives-and-tasks.query';
+} from '../../queries/get-all-objectives-and-tasks.query';
 
 export type MyObjectiveOutput = ObjectiveOutput & {
   /** Fait ou non fait, rien d'autre : les clients l'affichent sans rien calculer. */

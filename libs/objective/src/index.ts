@@ -1,13 +1,26 @@
+// Commandes : les gestes de la personne, chacun avec son intention.
+export * from './lib/usecases/create-objective.usecase';
 export * from './lib/usecases/add-sub-objective.usecase';
 export * from './lib/usecases/add-task-to-objective.usecase';
-export * from './lib/usecases/update-done-status-of-task.usecase';
-export * from './lib/usecases/create-objective.usecase';
+export * from './lib/usecases/rename-objective.usecase';
+export * from './lib/usecases/clarify-objective.usecase';
+export * from './lib/usecases/set-objective-deadline.usecase';
+export * from './lib/usecases/remove-objective-deadline.usecase';
 export * from './lib/usecases/delete-objective.usecase';
+export * from './lib/usecases/rename-task.usecase';
+export * from './lib/usecases/reprioritize-task.usecase';
+export * from './lib/usecases/move-task.usecase';
+export * from './lib/usecases/complete-task.usecase';
+export * from './lib/usecases/reopen-task.usecase';
 export * from './lib/usecases/delete-task.usecase';
-export * from './lib/usecases/edit-my-objective.usecase';
-export * from './lib/usecases/edit-my-task.usecase';
-export * from './lib/usecases/get-my-objectives.usecase';
 export * from './lib/usecases/what-is-today-focus.usecase';
+export * from './lib/mappers/command-output.mapper';
+
+// Anciens cas d'usage, servis par /v1 seulement (gelée) : supprimés avec elle.
+export * from './lib/usecases/legacy/edit-my-objective.usecase';
+export * from './lib/usecases/legacy/edit-my-task.usecase';
+export * from './lib/usecases/legacy/update-done-status-of-task.usecase';
+export * from './lib/usecases/legacy/get-my-objectives.usecase';
 
 export * from './lib/protocols/objective.repository';
 export * from './lib/protocols/task.repository';
@@ -21,6 +34,7 @@ export * from './lib/errors/task-not-found.error';
 export * from './lib/errors/fail-to-save-objective.error';
 export * from './lib/errors/fail-to-save-task.error';
 
+// Port de /v1 seulement (`GetMyObjectivesUsecase`) : la v2 lit l'arbre par le BFF (`@org/objective/bff`).
 export * from './lib/queries/get-all-objectives-and-tasks.query';
 
 export * from './lib/internal-services/objective-internal-service';

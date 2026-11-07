@@ -10,7 +10,7 @@ import {
   Patch,
   Post,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SendMessageToAIWorkflow } from '@org/ai-assistant';
 import type { AuthenticatedUserOutput } from '@org/auth';
 import {
@@ -24,6 +24,7 @@ import {
 import { CurrentUser } from '../auth/auth.decorators';
 import { openApiErrorSchema, openApiSchema } from '../http/openapi';
 import { unwrap } from '../http/result';
+import type { ObjectiveCommandOutput } from '@org/objective';
 import type {
   AddSubObjectiveBody,
   AddTaskBody,
@@ -42,9 +43,12 @@ import {
   subObjectiveResponseSchema,
 } from './objectives.schemas';
 
+const deprecated = { deprecated: true, description: 'v1 gelée : utiliser la v2.' };
+
+/** v1, gelée et dépréciée : supprimée quand les clients seront passés en v2 (docs/adr/0006). */
 @ApiTags('objectives')
 @ApiBearerAuth()
-@Controller('objectives')
+@Controller({ path: 'objectives', version: '1' })
 export class ObjectivesController {
   constructor(
     @Inject(GetMyObjectivesUsecase) private readonly getMyObjectives: GetMyObjectivesUsecase,
@@ -57,6 +61,7 @@ export class ObjectivesController {
   ) {}
 
   /** GetMyObjectivesUsecase : tous les objectifs, étapes et pas de la personne, à plat, chacun fait ou non fait. */
+  @ApiOperation(deprecated)
   @Get()
   @ApiResponse({ status: 200, schema: openApiSchema(objectivesResponseSchema) })
   async list(@CurrentUser() user: AuthenticatedUserOutput) {
@@ -64,6 +69,7 @@ export class ObjectivesController {
   }
 
   /** CreateObjectiveUsecase */
+  @ApiOperation(deprecated)
   @Post()
   @ApiResponse({ status: 201, schema: openApiSchema(objectiveResponseSchema) })
   @ApiResponse({ status: 400, description: 'VALIDATION_ERROR', schema: openApiErrorSchema() })
@@ -71,10 +77,11 @@ export class ObjectivesController {
     @CurrentUser() user: AuthenticatedUserOutput,
     @Body({ schema: createObjectiveSchema }) body: CreateObjectiveBody,
   ) {
-    return unwrap(await this.createObjective.execute({ ...body, ownerId: user.id }));
+    return toV1Objective(unwrap(await this.createObjective.execute({ ...body, ownerId: user.id })));
   }
 
   /** EditObjectiveUsecase : un objectif ou une étape. */
+  @ApiOperation(deprecated)
   @Patch(':objectiveId')
   @ApiResponse({ status: 200, schema: openApiSchema(objectiveResponseSchema) })
   @ApiResponse({ status: 404, description: 'OBJECTIVE_NOT_FOUND', schema: openApiErrorSchema() })
@@ -92,6 +99,7 @@ export class ObjectivesController {
    * DeleteObjectiveUsecase : un objectif ou une étape, avec tout ce qui en dépend. La base emporte
    * étapes, pas, conversation et messages ; l'état de l'assistant, qui vit hors de la base, part ensuite.
    */
+  @ApiOperation(deprecated)
   @Delete(':objectiveId')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiResponse({ status: 204, description: 'Supprimé, avec tout ce qui en dépend' })
@@ -105,6 +113,7 @@ export class ObjectivesController {
   }
 
   /** AddSubObjectiveUsecase : une étape sous un objectif ou une étape. */
+  @ApiOperation(deprecated)
   @Post(':objectiveId/sub-objectives')
   @HttpCode(HttpStatus.CREATED)
   @ApiResponse({ status: 201, schema: openApiSchema(subObjectiveResponseSchema) })
@@ -114,16 +123,18 @@ export class ObjectivesController {
     @Param('objectiveId', { schema: objectiveIdParam }) objectiveId: string,
     @Body({ schema: addSubObjectiveSchema }) body: AddSubObjectiveBody,
   ) {
-    return unwrap(
+    const { id, title } = unwrap(
       await this.addSubObjective.execute({
         parentObjectiveId: objectiveId,
         title: body.title,
         ownerId: user.id,
       }),
     );
+    return { id, title };
   }
 
   /** AddTaskToObjectiveUsecase : un pas sur un objectif ou une étape. */
+  @ApiOperation(deprecated)
   @Post(':objectiveId/tasks')
   @HttpCode(HttpStatus.CREATED)
   @ApiResponse({ status: 201, schema: openApiSchema(createdTaskResponseSchema) })
@@ -133,6 +144,20 @@ export class ObjectivesController {
     @Param('objectiveId', { schema: objectiveIdParam }) objectiveId: string,
     @Body({ schema: addTaskSchema }) body: AddTaskBody,
   ) {
-    return unwrap(await this.addTaskToObjective.execute({ objectiveId, ...body, ownerId: user.id }));
+    const { id, title, importance, urgency } = unwrap(
+      await this.addTaskToObjective.execute({ objectiveId, ...body, ownerId: user.id }),
+    );
+    return { id, title, importance, urgency };
   }
+}
+
+/** La forme de la v1 : les champs vides sont absents. */
+function toV1Objective(objective: ObjectiveCommandOutput) {
+  return {
+    id: objective.id,
+    title: objective.title,
+    description: objective.description || undefined,
+    why: objective.why || undefined,
+    dueDate: objective.dueDate ?? undefined,
+  };
 }

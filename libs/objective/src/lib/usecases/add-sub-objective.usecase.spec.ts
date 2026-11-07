@@ -20,7 +20,18 @@ describe('AddSubObjectiveUsecase', () => {
       ownerId: 'alice',
     });
 
-    expect(result).toEqual({ success: true, data: { id: 'stage-1', title: 'Préparer le corps' } });
+    expect(result).toEqual({
+      success: true,
+      data: {
+        id: 'stage-1',
+        title: 'Préparer le corps',
+        description: '',
+        why: '',
+        dueDate: null,
+        parentObjectiveId: 'o1',
+        done: false,
+      },
+    });
     expect(db.objectives.get('stage-1')).toMatchObject({ parentId: 'o1', ownerId: 'alice' });
     expect(db.tasks.get('t1')?.done).toBe(true);
   });

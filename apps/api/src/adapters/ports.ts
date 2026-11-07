@@ -3,6 +3,7 @@ import { AuthProvider } from '@org/auth';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { IdGenerator } from '@org/chore';
 import { GetAllObjectiveAndTaskQuery, ObjectiveRepository, TaskRepository } from '@org/objective';
+import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import { IWorkflowStateRepository } from '@org/ai-assistant';
 
 /**
@@ -15,6 +16,7 @@ export const PORTS = [
   ObjectiveRepository,
   TaskRepository,
   GetAllObjectiveAndTaskQuery,
+  GetObjectiveTreeQuery,
   AuthProvider,
   GetConversationsQuery,
   AddMessageCommand,

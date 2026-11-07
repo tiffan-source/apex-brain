@@ -11,6 +11,7 @@ import { createInMemoryChatInfrastructure } from '@org/chat/testing';
 import { IdGenerator } from '@org/chore';
 import { SequentialIdGenerator } from '@org/chore/testing';
 import { GetAllObjectiveAndTaskQuery, ObjectiveRepository, TaskRepository } from '@org/objective';
+import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import { createInMemoryObjectiveInfrastructure } from '@org/objective/testing';
 import request from 'supertest';
 import { PORTS } from '../../src/adapters/ports';
@@ -62,6 +63,7 @@ export async function createTestApp(environmentOverrides: Record<string, string>
       { provide: ObjectiveRepository, useValue: objectives.objectiveRepository },
       { provide: TaskRepository, useValue: objectives.taskRepository },
       { provide: GetAllObjectiveAndTaskQuery, useValue: objectives.getAllObjectiveAndTaskQuery },
+      { provide: GetObjectiveTreeQuery, useValue: objectives.getObjectiveTreeQuery },
       { provide: AuthProvider, useValue: auth },
       { provide: GetConversationsQuery, useValue: chat.getConversationsQuery },
       { provide: AddMessageCommand, useValue: chat.addMessageCommand },

@@ -12,6 +12,37 @@ const infrastructureImports = [
   'express',
 ];
 
+/** Les fichiers de test, seuls à pouvoir importer les doublures. */
+const testFiles = ['**/*.spec.ts', '**/src/testing.ts', '**/src/lib/testing/**', '**/test/**'];
+
+const testingImports = {
+  group: ['@org/*/testing'],
+  message: 'Les doublures de test ne sont importées que par les tests.',
+};
+
+const bffImports = {
+  group: ['@org/*/bff'],
+  message:
+    "Les lectures BFF ne servent que les clients : seuls l'adaptateur qui les implémente et l'app les importent.",
+};
+
+const relativeBffImports = {
+  group: ['**/bff', '**/bff/**'],
+  message: 'Une commande (ou Akari) ne lit jamais une lecture BFF.',
+};
+
+/**
+ * À ajouter à la configuration d'un projet qui implémente ou expose les lectures BFF (l'infrastructure,
+ * l'app) : il peut importer `@org/<lib>/bff`, toujours pas les doublures de test.
+ */
+export const allowBffImports = {
+  files: ['**/*.ts'],
+  ignores: testFiles,
+  rules: {
+    'no-restricted-imports': ['error', { patterns: [testingImports] }],
+  },
+};
+
 export default [
   ...nx.configs['flat/base'],
   ...nx.configs['flat/typescript'],
@@ -62,21 +93,22 @@ export default [
     },
   },
   {
-    // Les doublures de test (`@org/<lib>/testing`) ne partent jamais en production.
+    // Les doublures de test (`@org/<lib>/testing`) ne partent jamais en production, et les lectures
+    // BFF (`@org/<lib>/bff`) ne servent que les clients : seules l'infrastructure qui les implémente
+    // et l'application qui les expose les importent (docs/adr/0006-commandes-et-bff.md).
     files: ['**/*.ts'],
-    ignores: ['**/*.spec.ts', '**/src/testing.ts', '**/src/lib/testing/**', '**/test/**'],
+    ignores: testFiles,
     rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: ['@org/*/testing'],
-              message: 'Les doublures de test ne sont importées que par les tests.',
-            },
-          ],
-        },
-      ],
+      'no-restricted-imports': ['error', { patterns: [testingImports, bffImports] }],
+    },
+  },
+  {
+    // Dans un domaine, le dossier `bff/` ne sert que ses propres fichiers : une commande, un modèle ou
+    // la façade d'Akari ne lisent jamais une lecture BFF.
+    files: ['**/src/lib/**/*.ts'],
+    ignores: [...testFiles, '**/src/lib/bff/**'],
+    rules: {
+      'no-restricted-imports': ['error', { patterns: [testingImports, bffImports, relativeBffImports] }],
     },
   },
   {

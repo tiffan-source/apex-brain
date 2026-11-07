@@ -1,7 +1,7 @@
 import { Result, runWithResult } from '@org/chore';
-import { TaskNotFoundError } from '../errors/task-not-found.error';
-import { TaskRepository } from '../protocols/task.repository';
-import { FailToSaveTaskError } from '../errors/fail-to-save-task.error';
+import { TaskNotFoundError } from '../../errors/task-not-found.error';
+import { TaskRepository } from '../../protocols/task.repository';
+import { FailToSaveTaskError } from '../../errors/fail-to-save-task.error';
 
 export type UpdateDoneStatusOfTaskInput = {
   taskId: string;

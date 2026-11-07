@@ -81,6 +81,21 @@ cette cascade : la route met fin au workflow (`SendMessageToAIWorkflow.forget`) 
 supprimé. C'est pour cela que `ObjectivesModule` importe `AssistantModule`, et que
 `ObjectiveInternalService`, dont seul l'assistant se sert, est construit dans ce dernier.
 
+Ce tableau est celui de la **v1**, aujourd'hui gelée et dépréciée. La **v2**
+([ADR 0006](./adr/0006-commandes-et-bff.md)) sépare les commandes des lectures pour les clients :
+
+| v2 | Nature | Endpoint |
+|---|---|---|
+| `CreateObjectiveUsecase`, `AddSubObjectiveUsecase`, `AddTaskToObjectiveUsecase` | commandes | `POST /v2/objectives`, `…/{objectiveId}/sub-objectives`, `…/{objectiveId}/tasks` |
+| `RenameObjectiveUsecase`, `ClarifyObjectiveUsecase`, `SetObjectiveDeadlineUsecase`, `RemoveObjectiveDeadlineUsecase` *(remplacent `EditObjectiveUsecase`)* | commandes | `PATCH /v2/objectives/{objectiveId}/rename`, `/clarify`, `/set-deadline`, `/remove-deadline` |
+| `RenameTaskUsecase`, `ReprioritizeTaskUsecase`, `MoveTaskUsecase` *(remplacent `EditMyTaskUsecase`)* | commandes | `PATCH /v2/tasks/{taskId}/rename`, `/reprioritize`, `/move` |
+| `CompleteTaskUsecase`, `ReopenTaskUsecase` *(remplacent `UpdateDoneStatusOfTaskUsecase`)* | commandes | `PATCH /v2/tasks/{taskId}/complete`, `/reopen` |
+| `DeleteObjectiveUsecase`, `DeleteTaskUsecase` | commandes | `DELETE /v2/objectives/{objectiveId}`, `DELETE /v2/tasks/{taskId}` |
+| `WhatIsTodayFocusUsecase` | cas d'usage | `GET /v2/tasks/today-focus` |
+| `GetObjectiveTreeQuery` *(remplace `GetMyObjectivesUsecase`)* | lecture BFF | `GET /v2/bff/objective-tree` |
+
+L'authentification, la conversation et l'assistant répondent sous `/v1` et `/v2`.
+
 Le contrat détaillé (corps, réponses, codes d'erreur) est dans [`docs/api.md`](./api.md) ; le
 document OpenAPI est servi par l'API sur `/docs` et `/docs-json`.
 
@@ -110,6 +125,11 @@ document OpenAPI est servi par l'API sur `/docs` et `/docs-json`.
    pourront tout refuser aux navigateurs (aujourd'hui elles doivent laisser n'importe quel client
    écrire dans `workflow-states`).
 7. **Identifiants**. `crypto.randomUUID()` remplace `Math.random()`.
+8. **Commandes et lectures BFF** ([ADR 0006](./adr/0006-commandes-et-bff.md)). Les cas d'usage
+   sont des commandes nommées d'après le geste de la personne (plus de `PATCH` générique) et rendent
+   l'entité modifiée. Les lectures pour les clients sont des ports BFF rangés dans le dossier `bff/`
+   du domaine (`@org/objective/bff`), implémentés par Supabase, interdits aux commandes et à Akari
+   par le lint. Servi en v2 ; la v1 reste gelée tant que les clients l'appellent.
 
 ## 5. Corrections (bugs constatés dans Apex)
 
@@ -198,8 +218,15 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE.
 - **Étapes et pas sans ordre** : ils sont indépendants, aucun n'en attend un autre. Une étape est
   faite ou non faite, rien d'autre : `done` dans `GET /v1/objectives` (`GetMyObjectivesUsecase`),
-  et les clients l'affichent sans le calculer. Il vaut `true` avec au moins un pas, tous faits ; la
-  colonne `objectives.done` n'est toujours pas lue. Akari le sait (instructions, `getObjectiveTree`).
+  et les clients l'affichent sans le calculer. Il vaut `true` avec au moins un pas, tous faits.
+  Akari le sait (instructions, `getObjectiveTree`).
+- **`done` des objectifs en v2** : l'arbre BFF (`GET /v2/bff/objective-tree`) et les commandes
+  rendent la colonne `objectives.done` telle quelle. Rien ne la tient à jour : elle vaut `false` à
+  la création et y reste, même quand tous les pas sont faits. Décision assumée (ADR 0006) ; à
+  reprendre si les clients v2 doivent afficher « objectif terminé ».
+- **Passage des clients en v2** : web et mobile passent aux commandes et à l'arbre BFF. Quand plus
+  aucun n'appelle la v1 : supprimer `ObjectivesController`, `TasksController`,
+  `libs/objective/src/lib/usecases/legacy/` et `GetAllObjectiveAndTaskQuery` (et son adaptateur).
 - **Règles métier encore dans le client** : la catégorie d'Eisenhower vit encore dans le client
   mobile ; le web a retiré sa matrice en attendant que le serveur la calcule. Aucun cas d'usage de
   déplacement n'est prévu : un pas ne se déplace pas depuis la matrice, il suit son importance et

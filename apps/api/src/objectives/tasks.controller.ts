@@ -10,7 +10,7 @@ import {
   Patch,
   Put,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { AuthenticatedUserOutput } from '@org/auth';
 import {
   DeleteTaskUsecase,
@@ -31,9 +31,12 @@ import {
   todayFocusResponseSchema,
 } from './objectives.schemas';
 
+const deprecated = { deprecated: true, description: 'v1 gelée : utiliser la v2.' };
+
+/** v1, gelée et dépréciée : supprimée quand les clients seront passés en v2 (docs/adr/0006). */
 @ApiTags('tasks')
 @ApiBearerAuth()
-@Controller('tasks')
+@Controller({ path: 'tasks', version: '1' })
 export class TasksController {
   constructor(
     @Inject(EditMyTaskUsecase) private readonly editMyTask: EditMyTaskUsecase,
@@ -43,6 +46,7 @@ export class TasksController {
   ) {}
 
   /** WhatIsTodayFocusUsecase : les cinq pas du jour. */
+  @ApiOperation(deprecated)
   @Get('today-focus')
   @ApiResponse({ status: 200, schema: openApiSchema(todayFocusResponseSchema) })
   async todayFocus(@CurrentUser() user: AuthenticatedUserOutput) {
@@ -50,6 +54,7 @@ export class TasksController {
   }
 
   /** EditMyTaskUsecase : modifier un pas, ou le déplacer en changeant `objectiveId`. */
+  @ApiOperation(deprecated)
   @Patch(':taskId')
   @ApiResponse({ status: 200, schema: openApiSchema(editedTaskResponseSchema) })
   @ApiResponse({
@@ -66,6 +71,7 @@ export class TasksController {
   }
 
   /** DeleteTaskUsecase */
+  @ApiOperation(deprecated)
   @Delete(':taskId')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiResponse({ status: 204, description: 'Pas supprimé' })
@@ -78,6 +84,7 @@ export class TasksController {
   }
 
   /** UpdateDoneStatusOfTaskUsecase : cocher ou décocher un pas. */
+  @ApiOperation(deprecated)
   @Put(':taskId/done')
   @ApiResponse({ status: 200, schema: openApiSchema(taskDoneResponseSchema) })
   @ApiResponse({ status: 404, description: 'TASK_NOT_FOUND', schema: openApiErrorSchema() })

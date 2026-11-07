@@ -1,7 +1,7 @@
 import { Result, runWithResult } from '@org/chore';
-import { FailToSaveObjectiveError } from '../errors/fail-to-save-objective.error';
-import { ObjectiveNotFoundError } from '../errors/objective-not-found.error';
-import { ObjectiveRepository } from '../protocols/objective.repository';
+import { FailToSaveObjectiveError } from '../../errors/fail-to-save-objective.error';
+import { ObjectiveNotFoundError } from '../../errors/objective-not-found.error';
+import { ObjectiveRepository } from '../../protocols/objective.repository';
 
 export interface EditObjectiveInput {
   objective: {

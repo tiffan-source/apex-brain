@@ -1,4 +1,4 @@
-import { createInMemoryObjectiveInfrastructure, seedObjective, seedTask } from '../../testing';
+import { createInMemoryObjectiveInfrastructure, seedObjective, seedTask } from '../../../testing';
 import { EditMyTaskUsecase } from './edit-my-task.usecase';
 
 describe('EditMyTaskUsecase', () => {
