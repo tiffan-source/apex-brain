@@ -146,5 +146,26 @@ describe('Commandes sur un pas', () => {
       });
       expect(db.tasks.get('t1')?.objectiveId).toBe('s1');
     });
+
+    it("descend un pas d'un objectif vers l'une de ses étapes", async () => {
+      const { db, move } = setup();
+      seedTask(db, { id: 't3', ownerId: 'alice', objectiveId: 'o1' });
+
+      const result = await move.execute({ taskId: 't3', objectiveId: 's1', ownerId: 'alice' });
+
+      expect(result).toMatchObject({ success: true, data: { objectiveId: 's1' } });
+      expect(db.tasks.get('t3')?.objectiveId).toBe('s1');
+      expect(db.tasks.get('t2')).toMatchObject({ objectiveId: 's1', done: true });
+    });
+
+    it("signale FAIL_TO_SAVE_OBJECTIVE quand l'enregistrement n'aboutit pas", async () => {
+      const { db, move } = setup();
+      db.failWrites = true;
+
+      const result = await move.execute({ taskId: 't1', objectiveId: 'o2', ownerId: 'alice' });
+
+      expect(result).toMatchObject({ success: false, error: { code: 'FAIL_TO_SAVE_OBJECTIVE' } });
+      expect(db.tasks.get('t1')?.objectiveId).toBe('s1');
+    });
   });
 });

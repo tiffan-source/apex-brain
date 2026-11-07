@@ -156,5 +156,18 @@ describe('v2 — commandes sur un pas (e2e)', () => {
 
     expect(response.status).toBe(200);
     expect(todayFocusResponseSchema.parse(response.body).map((task) => task.id)).toEqual(['t1']);
+
+    // Le focus du jour ne montre que les pas de la personne.
+    seedTask(t.objectives.db, {
+      id: 'mt1',
+      ownerId: mallory.id,
+      objectiveId: 'm1',
+      importance: 5,
+      urgency: 5,
+    });
+    const mine = await t.http().get('/v2/tasks/today-focus').set('Authorization', alice.authorization);
+    const theirs = await t.http().get('/v2/tasks/today-focus').set('Authorization', mallory.authorization);
+    expect(mine.body.map((task: { id: string }) => task.id)).toEqual(['t1']);
+    expect(theirs.body.map((task: { id: string }) => task.id)).toEqual(['mt1']);
   });
 });

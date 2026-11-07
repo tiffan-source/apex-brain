@@ -139,6 +139,8 @@ describe('v2 — commandes sur un objectif ou une étape (e2e)', () => {
     });
 
     it("ne laisse personne d'autre modifier ni supprimer l'objectif (OBJECTIVE_NOT_FOUND)", async () => {
+      const beforeObjectives = t.objectives.db.objectives.size;
+      const beforeTasks = t.objectives.db.tasks.size;
       const attempts = [
         await as(mallory).patch('/v2/objectives/o1/rename', { title: 'Volé' }),
         await as(mallory).patch('/v2/objectives/o1/clarify', { why: 'Volé' }),
@@ -158,6 +160,9 @@ describe('v2 — commandes sur un objectif ou une étape (e2e)', () => {
         why: 'Parce que',
         dueDate: new Date('2027-04-01T00:00:00.000Z'),
       });
+      // Ni étape ni pas ajoutés sous l'objectif d'Alice.
+      expect(t.objectives.db.objectives.size).toBe(beforeObjectives);
+      expect(t.objectives.db.tasks.size).toBe(beforeTasks);
     });
 
     it('supprime un objectif avec ses étapes et ses pas (deleteObjective)', async () => {
@@ -249,22 +254,6 @@ describe('v2 — commandes sur un objectif ou une étape (e2e)', () => {
       expect(response.body.error.code).toBe('VALIDATION_ERROR');
       expect(response.body.error.details.map((detail: { path: string }) => detail.path)).toContain(path);
     }
-  });
-
-  it("n'ajoute rien sous l'objectif d'une autre personne (OBJECTIVE_NOT_FOUND)", async () => {
-    seedObjective(t.objectives.db, { id: 'o1', ownerId: alice.id });
-
-    const attempts = [
-      as(mallory).post('/v2/objectives/o1/sub-objectives', { title: 'Intrusion' }),
-      as(mallory).post('/v2/objectives/o1/tasks', { title: 'Intrusion', importance: 1, urgency: 1 }),
-    ];
-
-    for (const response of await Promise.all(attempts)) {
-      expect(response.status).toBe(404);
-      expect(response.body.error.code).toBe('OBJECTIVE_NOT_FOUND');
-    }
-    expect([...t.objectives.db.objectives.keys()]).toEqual(['o1']);
-    expect(t.objectives.db.tasks.size).toBe(0);
   });
 
   it("répond 500 sans détail technique quand l'enregistrement échoue", async () => {
