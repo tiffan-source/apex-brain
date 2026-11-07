@@ -37,9 +37,8 @@ export function configureApp(app: INestApplication, environment: Environment): v
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
   });
 
-  // Toutes les routes sous /v1 et /v2 (sauf /health) : ce qui n'a pas changé est servi par les deux.
-  // Les objectifs et les pas ont leurs contrôleurs par version : la v1 gelée, la v2 en commandes et BFF.
-  app.enableVersioning({ type: VersioningType.URI, defaultVersion: ['1', '2'] });
+  // Toutes les routes sous /v2 (sauf /health). La v1 a été retirée (ADR 0007).
+  app.enableVersioning({ type: VersioningType.URI, defaultVersion: '2' });
 
   app.enableShutdownHooks();
 

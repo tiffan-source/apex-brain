@@ -74,14 +74,15 @@ par le serveur, les clients doivent pouvoir renouveler un jeton expiré et ferme
 parler à Supabase. La déconnexion figurait déjà dans les cas d'usage manquants du `TODO.md` d'Apex.
 
 `DeleteObjectiveUsecase` et `DeleteTaskUsecase` sont nouveaux eux aussi : une seule route supprime
-un objectif ou une étape, comme `PATCH /v1/objectives/{objectiveId}` modifie l'un ou l'autre. Il n'y
+un objectif ou une étape, comme les commandes de modification valent pour l'un ou l'autre. Il n'y
 a pas de règle métier : la propriété borne la suppression, et les `ON DELETE CASCADE` de la base
 emportent étapes, pas, conversation et messages. L'état de l'assistant vit dans Firestore, hors de
 cette cascade : la route met fin au workflow (`SendMessageToAIWorkflow.forget`) une fois l'objectif
 supprimé. C'est pour cela que `ObjectivesModule` importe `AssistantModule`, et que
 `ObjectiveInternalService`, dont seul l'assistant se sert, est construit dans ce dernier.
 
-Ce tableau est celui de la **v1**, aujourd'hui gelée et dépréciée. La **v2**
+Ce tableau est celui de la **v1**, retirée le 8 novembre 2026
+([ADR 0007](./adr/0007-retrait-de-la-v1.md)) : il reste comme trace du portage. La **v2**
 ([ADR 0006](./adr/0006-commandes-et-bff.md)) sépare les commandes des lectures pour les clients :
 
 | v2 | Nature | Endpoint |
@@ -94,7 +95,8 @@ Ce tableau est celui de la **v1**, aujourd'hui gelée et dépréciée. La **v2**
 | `WhatIsTodayFocusUsecase` | cas d'usage | `GET /v2/tasks/today-focus` |
 | `GetObjectiveTreeQuery` *(remplace `GetMyObjectivesUsecase`)* | lecture BFF | `GET /v2/bff/objective-tree` |
 
-L'authentification, la conversation et l'assistant répondent sous `/v1` et `/v2`.
+L'authentification, la conversation et l'assistant répondent sous `/v2` (les mêmes routes que la v1,
+autre préfixe).
 
 Le contrat détaillé (corps, réponses, codes d'erreur) est dans [`docs/api.md`](./api.md) ; le
 document OpenAPI est servi par l'API sur `/docs` et `/docs-json`.
@@ -129,7 +131,7 @@ document OpenAPI est servi par l'API sur `/docs` et `/docs-json`.
    sont des commandes nommées d'après le geste de la personne (plus de `PATCH` générique) et rendent
    l'entité modifiée. Les lectures pour les clients sont des ports BFF rangés dans le dossier `bff/`
    du domaine (`@org/objective/bff`), implémentés par Supabase, interdits aux commandes et à Akari
-   par le lint. Servi en v2 ; la v1 reste gelée tant que les clients l'appellent.
+   par le lint. Servi en v2 ; la v1 a été retirée ([ADR 0007](./adr/0007-retrait-de-la-v1.md)).
 
 ## 5. Corrections (bugs constatés dans Apex)
 
@@ -217,16 +219,19 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
   fois le client migré ; verrouiller les règles Firestore (le navigateur n'y écrit plus).
 - **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE.
 - **Étapes et pas sans ordre** : ils sont indépendants, aucun n'en attend un autre. Une étape est
-  faite ou non faite, rien d'autre : `done` dans `GET /v1/objectives` (`GetMyObjectivesUsecase`),
-  et les clients l'affichent sans le calculer. Il vaut `true` avec au moins un pas, tous faits.
-  Akari le sait (instructions, `getObjectiveTree`).
+  faite ou non faite, rien d'autre. Seul Akari le dérive encore (au moins un pas, tous faits :
+  instructions, `getObjectiveTree`) ; depuis le retrait de la v1, l'API rend la colonne en base.
 - **`done` des objectifs en v2** : l'arbre BFF (`GET /v2/bff/objective-tree`) et les commandes
   rendent la colonne `objectives.done` telle quelle. Rien ne la tient à jour : elle vaut `false` à
   la création et y reste, même quand tous les pas sont faits. Décision assumée (ADR 0006) ; à
-  reprendre si les clients v2 doivent afficher « objectif terminé ».
-- **Passage des clients en v2** : web et mobile passent aux commandes et à l'arbre BFF. Quand plus
-  aucun n'appelle la v1 : supprimer `ObjectivesController`, `TasksController`,
-  `libs/objective/src/lib/usecases/legacy/` et `GetAllObjectiveAndTaskQuery` (et son adaptateur).
+  reprendre si les clients v2 doivent afficher « objectif terminé ». Le client web l'attend : il
+  ne relit plus l'arbre après un geste accepté (ADR 0001 d'apex), donc il faut aussi **rendre** le
+  `done` des étapes et de l'objectif qui changent après une commande sur un pas (`completeTask`,
+  `reopenTask`, `addTaskToObjective`, `moveTask`, `deleteTask`), pas seulement tenir la colonne.
+- **Passage des clients en v2** : le web est passé aux commandes et à l'arbre BFF (7 novembre
+  2026). La v1 a été retirée le 8 novembre 2026 ([ADR 0007](./adr/0007-retrait-de-la-v1.md)) :
+  le mobile doit appeler `/v2` (commandes, arbre BFF, et le préfixe `/v2` pour l'authentification,
+  la conversation et l'assistant).
 - **Règles métier encore dans le client** : la catégorie d'Eisenhower vit encore dans le client
   mobile ; le web a retiré sa matrice en attendant que le serveur la calcule. Aucun cas d'usage de
   déplacement n'est prévu : un pas ne se déplace pas depuis la matrice, il suit son importance et

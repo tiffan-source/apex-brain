@@ -7,14 +7,13 @@ import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { IdGenerator, UuidIdGenerator } from '@org/chore';
 import { FirebaseClientDataAccess, FirebaseWorkflowStateRepository } from '@org/firebase';
 import { createGeminiInteractionsClient, GeminiInteractiveAIProvider } from '@org/gemini';
-import { GetAllObjectiveAndTaskQuery, ObjectiveRepository, TaskRepository } from '@org/objective';
+import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import {
   SupabaseAddMessageCommand,
   SupabaseAuthServices,
   SupabaseClientDataAccess,
   SupabaseGetAllMessagesQuery,
-  SupabaseGetAllObjectiveAndTaskQuery,
   SupabaseGetObjectiveTreeQuery,
   SupabaseObjectiveRepository,
   SupabaseTaskRepository,
@@ -53,10 +52,6 @@ export class ProductionAdaptersModule {
         { provide: IdGenerator, useFactory: () => new UuidIdGenerator() },
         fromSupabase(ObjectiveRepository, (client) => new SupabaseObjectiveRepository(client)),
         fromSupabase(TaskRepository, (client) => new SupabaseTaskRepository(client)),
-        fromSupabase(
-          GetAllObjectiveAndTaskQuery,
-          (client) => new SupabaseGetAllObjectiveAndTaskQuery(client),
-        ),
         fromSupabase(GetObjectiveTreeQuery, (client) => new SupabaseGetObjectiveTreeQuery(client)),
         fromSupabase(AuthProvider, (client) => new SupabaseAuthServices(client)),
         fromSupabase(GetConversationsQuery, (client) => new SupabaseGetAllMessagesQuery(client)),

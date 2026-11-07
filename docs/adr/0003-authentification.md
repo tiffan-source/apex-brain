@@ -11,7 +11,8 @@ reste le fournisseur d'identité.
 
 ## Décision
 
-- L'API expose `POST /v1/auth/register`, `/login`, `/refresh`, `/logout` et `GET /v1/auth/me`.
+- L'API expose `POST /v2/auth/register`, `/login`, `/refresh`, `/logout` et `GET /v2/auth/me`
+  (sous `/v1` jusqu'à l'[ADR 0007](./0007-retrait-de-la-v1.md)).
   `login`, `register` et `refresh` rendent une session : `accessToken`, `refreshToken`,
   `expiresAt`. Le client la garde et envoie `Authorization: Bearer <accessToken>`.
 - Une garde globale vérifie le jeton à chaque requête par `GetCurrentUserUseCase`, qui s'appuie

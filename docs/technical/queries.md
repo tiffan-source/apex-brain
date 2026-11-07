@@ -4,7 +4,8 @@
 > the `bff/` folder of their domain (`libs/<domain>/src/lib/bff/`, exported by `@org/<domain>/bff`),
 > are implemented directly by the infrastructure and exposed under `/v2/bff`. Commands and Akari never
 > import them (lint rule). The rules below (no business logic, errors propagate, ownership) apply to
-> them. `queries/` only keeps `GetAllObjectiveAndTaskQuery`, used by the frozen v1.
+> them. The last non-BFF query of the objective domain, `GetAllObjectiveAndTaskQuery`, left with the v1
+> (ADR 0007).
 
 In some domain lib, we could observe querie classes. This is because we want to seperate what is a usecase and what is a data fetching motivate by the client (web page, mobile, etc) need. It will consist of simple interface wich will be implement in the data storage infra.
 

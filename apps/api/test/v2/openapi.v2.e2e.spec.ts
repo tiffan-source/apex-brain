@@ -6,7 +6,7 @@ describe('v2 — document OpenAPI (e2e)', () => {
 
   afterEach(() => t?.close());
 
-  it('publie les commandes v2 sous leur nom, le BFF sous son tag, et déprécie la v1 des objectifs', async () => {
+  it('publie les commandes v2 sous leur nom, le BFF sous son tag, et ne sert plus la v1', async () => {
     t = await createTestApp();
     const document = (await t.http().get('/docs-json')).body;
 
@@ -43,23 +43,14 @@ describe('v2 — document OpenAPI (e2e)', () => {
     expect(operation('/v2/objectives/{objectiveId}', 'patch')).toBeUndefined();
     expect(operation('/v2/tasks/{taskId}', 'patch')).toBeUndefined();
 
-    for (const [path, method] of [
-      ['/v1/objectives', 'get'],
-      ['/v1/objectives/{objectiveId}', 'patch'],
-      ['/v1/tasks/{taskId}', 'patch'],
-      ['/v1/tasks/{taskId}/done', 'put'],
-    ]) {
-      expect(operation(path, method)?.deprecated, `${method.toUpperCase()} ${path}`).toBe(true);
-    }
-
-    // Ce qui n'a pas changé est servi par les deux versions.
+    // La v1 est retirée : plus aucune route sous /v1, authentification et assistant compris.
+    expect(Object.keys(document.paths).filter((path) => path.startsWith('/v1/'))).toEqual([]);
     for (const path of [
       '/auth/login',
       '/auth/me',
       '/objectives/{objectiveId}/conversation',
       '/objectives/{objectiveId}/assistant/messages',
     ]) {
-      expect(document.paths).toHaveProperty(`/v1${path}`);
       expect(document.paths).toHaveProperty(`/v2${path}`);
     }
 

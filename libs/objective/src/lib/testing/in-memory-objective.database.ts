@@ -8,11 +8,6 @@ import { Objective } from '../models/objective';
 import { Task } from '../models/task';
 import { ObjectiveRepository } from '../protocols/objective.repository';
 import { TaskRepository } from '../protocols/task.repository';
-import {
-  GetAllObjectiveAndTaskInput,
-  GetAllObjectiveAndTaskOutput,
-  GetAllObjectiveAndTaskQuery,
-} from '../queries/get-all-objectives-and-tasks.query';
 
 export type ObjectiveRow = {
   id: string;
@@ -245,33 +240,6 @@ export class InMemoryTaskRepository extends TaskRepository {
   }
 }
 
-export class InMemoryGetAllObjectiveAndTaskQuery extends GetAllObjectiveAndTaskQuery {
-  constructor(private readonly db: InMemoryObjectiveDatabase) {
-    super();
-  }
-
-  async execute(input: GetAllObjectiveAndTaskInput): Promise<GetAllObjectiveAndTaskOutput> {
-    return {
-      objectives: this.db.objectivesOf(input.ownerId).map((row) => ({
-        id: row.id,
-        title: row.title,
-        description: row.description ?? '',
-        why: row.why ?? '',
-        dueDate: row.dueDate,
-        parentObjective: row.parentId,
-      })),
-      tasks: this.db.tasksOf(input.ownerId).map((row) => ({
-        id: row.id,
-        title: row.title,
-        importance: row.importance,
-        urgency: row.urgency,
-        done: row.done,
-        objectiveId: row.objectiveId,
-      })),
-    };
-  }
-}
-
 /** Comme l'adaptateur Supabase du BFF : l'arbre de la personne, `done` tel qu'il est en base. */
 export class InMemoryGetObjectiveTreeQuery extends GetObjectiveTreeQuery {
   constructor(private readonly db: InMemoryObjectiveDatabase) {
@@ -308,7 +276,6 @@ export function createInMemoryObjectiveInfrastructure() {
     db,
     objectiveRepository: new InMemoryObjectiveRepository(db),
     taskRepository: new InMemoryTaskRepository(db),
-    getAllObjectiveAndTaskQuery: new InMemoryGetAllObjectiveAndTaskQuery(db),
     getObjectiveTreeQuery: new InMemoryGetObjectiveTreeQuery(db),
   };
 }

@@ -1,4 +1,4 @@
-import { Objective, ObjectiveOutput, TaskOutput } from '@org/objective';
+import { Objective } from '@org/objective';
 import { Database } from '../../database.types';
 import { TaskMapper, TaskRow } from './task.mapper';
 
@@ -79,27 +79,5 @@ export class ObjectiveMapper {
 
     // 4. Retourne l'instance de l'objectif racine demandé avec tout son arbre rattaché
     return objectiveMap.get(targetRootId) ?? null;
-  }
-
-  static toObjectiveOutput(flatObjectives: ObjectiveRow[]): ObjectiveOutput[] {
-    return flatObjectives.map((row) => ({
-      id: row.id,
-      title: row.title,
-      description: row.description ?? '',
-      why: row.why ?? '',
-      dueDate: row.due_date ? new Date(row.due_date) : null,
-      parentObjective: row.parent_id,
-    }));
-  }
-
-  static toTaskOutput(flatTasks: TaskRow[]): TaskOutput[] {
-    return flatTasks.map((row) => ({
-      id: row.id,
-      title: row.title,
-      importance: row.importance,
-      urgency: row.urgency,
-      done: row.done,
-      objectiveId: row.objective_id,
-    }));
   }
 }
