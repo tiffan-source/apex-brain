@@ -8,6 +8,8 @@ const infrastructureImports = [
   'firebase-admin',
   'firebase-admin/*',
   '@google/genai',
+  '@anthropic-ai/sdk',
+  '@anthropic-ai/sdk/*',
   '@nestjs/*',
   'express',
 ];

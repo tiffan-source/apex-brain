@@ -37,6 +37,7 @@
       "@org/ai/testing": ["./libs/ai/src/testing.ts"],
       "@org/supabase": ["./libs/supabase/src/index.ts"],
       "@org/gemini": ["./libs/gemini/src/index.ts"],
+      "@org/claude": ["./libs/claude/src/index.ts"],
       "@org/firebase": ["./libs/firebase/src/index.ts"],
       "@org/ai-assistant": ["./workflows/ai-assistant/src/index.ts"]
     }
