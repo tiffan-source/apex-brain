@@ -1,3 +1,4 @@
+import { ROLES } from '@org/user';
 import { z } from 'zod';
 import { dateOutputSchema } from '../http/schemas';
 
@@ -18,6 +19,7 @@ export const userResponseSchema = z.object({
   id: z.string(),
   name: z.string(),
   email: z.string(),
+  roles: z.array(z.enum(ROLES)).meta({ description: 'Vide pour un compte de base.' }),
 });
 
 export const sessionResponseSchema = z.object({

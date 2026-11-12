@@ -1,5 +1,5 @@
+import { Role, User } from '@org/user';
 import { AuthSession } from '../models/auth-session';
-import { User } from '../models/user';
 import { AuthProvider, Registration } from '../protocols/auth.provider';
 import { UserAlreadyExistError } from '../errors/user-already-exist.error';
 import { WeakPasswordError } from '../errors/weak-password.error';
@@ -7,7 +7,15 @@ import { InvalidCredentialsError } from '../errors/invalid-credentials.error';
 import { EmailNotConfirmedError } from '../errors/email-not-confirmed.error';
 import { InvalidSessionError } from '../errors/invalid-session.error';
 
-type Account = { id: string; email: string; password: string; displayName?: string; confirmed: boolean };
+type Account = {
+  id: string;
+  email: string;
+  password: string;
+  displayName?: string;
+  /** Comme `app_metadata.roles` chez Supabase : posés par le serveur, jamais par la personne. */
+  roles: readonly Role[];
+  confirmed: boolean;
+};
 
 /**
  * Un fournisseur d'identité en mémoire, avec les règles de Supabase utiles aux tests :
@@ -26,10 +34,15 @@ export class InMemoryAuthProvider extends AuthProvider {
     super();
   }
 
-  /** Créer un compte directement (avec un nom d'affichage, si besoin) et rendre son jeton d'accès. */
-  seedAccount(email: string, password: string, displayName?: string): { id: string; accessToken: string } {
+  /** Créer un compte directement (nom d'affichage et rôles, si besoin) et rendre son jeton d'accès. */
+  seedAccount(
+    email: string,
+    password: string,
+    profile: { displayName?: string; roles?: readonly Role[] } = {},
+  ): { id: string; accessToken: string } {
     const id = this.nextId('user');
-    this.accounts.set(email, { id, email, password, displayName, confirmed: true });
+    const { displayName, roles = [] } = profile;
+    this.accounts.set(email, { id, email, password, displayName, roles, confirmed: true });
     return { id, accessToken: this.openSession(this.accounts.get(email) as Account).accessToken };
   }
 
@@ -38,7 +51,7 @@ export class InMemoryAuthProvider extends AuthProvider {
     if (password.length < 6) throw new WeakPasswordError(['length']);
 
     const confirmed = !this.options.requireEmailConfirmation;
-    const account: Account = { id: this.nextId('user'), email, password, confirmed };
+    const account: Account = { id: this.nextId('user'), email, password, roles: [], confirmed };
     this.accounts.set(email, account);
 
     return { user: this.toUser(account), session: confirmed ? this.openSession(account) : null };
@@ -93,6 +106,7 @@ export class InMemoryAuthProvider extends AuthProvider {
     const user = new User(account.id, account.email);
     user.setEmailVerified(account.confirmed);
     if (account.displayName) user.setDisplayName(account.displayName);
+    user.setRoles(account.roles);
     return user;
   }
 

@@ -13,6 +13,7 @@ import { SequentialIdGenerator } from '@org/chore/testing';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import { createInMemoryObjectiveInfrastructure } from '@org/objective/testing';
+import type { Role } from '@org/user';
 import request from 'supertest';
 import { PORTS } from '../../src/adapters/ports';
 import { AppModule } from '../../src/app.module';
@@ -83,9 +84,9 @@ export async function createTestApp(environmentOverrides: Record<string, string>
 
   const http = () => request(app.getHttpServer());
 
-  /** Créer une personne et rendre de quoi appeler l'API en son nom. */
-  const signIn = (email: string) => {
-    const { id, accessToken } = auth.seedAccount(email, 'secret123');
+  /** Créer une personne (avec des rôles, si besoin) et rendre de quoi appeler l'API en son nom. */
+  const signIn = (email: string, roles: readonly Role[] = []) => {
+    const { id, accessToken } = auth.seedAccount(email, 'secret123', { roles });
     return { id, accessToken, authorization: `Bearer ${accessToken}` };
   };
 

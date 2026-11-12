@@ -1,4 +1,4 @@
-import { User } from './user';
+import { User } from '@org/user';
 
 /**
  * Une session ouverte auprès du fournisseur d'identité : le jeton d'accès à présenter à chaque

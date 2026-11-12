@@ -24,9 +24,10 @@ export function createIntegrationAccess(): SupabaseClientDataAccess {
   return new SupabaseClientDataAccess(integrationConfig());
 }
 
-/** Créer une personne confirmée et rendre son id. */
+/** Créer une personne confirmée (avec des rôles dans `app_metadata`, si besoin) et rendre son id. */
 export async function createTestUser(
   label: string,
+  options: { roles?: unknown[] } = {},
 ): Promise<{ id: string; email: string; password: string }> {
   const config = integrationConfig();
   const admin = createClient<Database>(config.url, config.secretKey, {
@@ -34,7 +35,12 @@ export async function createTestUser(
   });
   const email = `${label}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@apex.test`;
   const password = 'secret-123456';
-  const { data, error } = await admin.auth.admin.createUser({ email, password, email_confirm: true });
+  const { data, error } = await admin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    ...(options.roles ? { app_metadata: { roles: options.roles } } : {}),
+  });
 
   if (error || !data.user) {
     throw new Error(`Création de la personne de test impossible : ${error?.message}`);

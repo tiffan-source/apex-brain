@@ -66,9 +66,17 @@ export default [
               bannedExternalImports: infrastructureImports,
             },
             {
-              // Un domaine ne connaît que le noyau : ni les autres domaines, ni l'IA, ni l'infrastructure.
+              // Un domaine ne connaît que le noyau : ni les autres domaines, ni l'identité (la personne,
+              // ses rôles : il ne reçoit que l'id du propriétaire), ni l'IA, ni l'infrastructure.
               sourceTag: 'type:domain',
               onlyDependOnLibsWithTags: ['type:kernel'],
+              bannedExternalImports: infrastructureImports,
+            },
+            {
+              // L'identité (user, auth) : qui est la personne, ses rôles, comment elle se connecte.
+              // Invisible du métier et des workflows ; seules l'infrastructure et l'app la voient.
+              sourceTag: 'type:identity',
+              onlyDependOnLibsWithTags: ['type:identity', 'type:kernel'],
               bannedExternalImports: infrastructureImports,
             },
             {
@@ -78,14 +86,20 @@ export default [
               bannedExternalImports: infrastructureImports,
             },
             {
-              // L'infrastructure implémente les ports du domaine et des workflows.
+              // L'infrastructure implémente les ports du domaine, de l'identité et des workflows.
               sourceTag: 'type:infra',
-              onlyDependOnLibsWithTags: ['type:domain', 'type:workflow', 'type:kernel'],
+              onlyDependOnLibsWithTags: ['type:domain', 'type:identity', 'type:workflow', 'type:kernel'],
             },
             {
               // L'application est la racine de composition : elle seule assemble tout.
               sourceTag: 'type:app',
-              onlyDependOnLibsWithTags: ['type:infra', 'type:workflow', 'type:domain', 'type:kernel'],
+              onlyDependOnLibsWithTags: [
+                'type:infra',
+                'type:workflow',
+                'type:domain',
+                'type:identity',
+                'type:kernel',
+              ],
             },
           ],
         },
