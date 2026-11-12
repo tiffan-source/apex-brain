@@ -12,21 +12,25 @@ l'application NestJS `apps/api`.
                                    │  HTTP + JSON, Bearer
                                    ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│ apps/api  (type:app)                                                  │
-│   contrôleurs ── schémas zod (contrat HTTP) ── garde d'auth ── filtre  │
-│   modules métier : assemblent cas d'usage et workflow sur les ports    │
-│   ProductionAdaptersModule : branche chaque port sur son adaptateur    │
+│ apps/api  (type:app)                                                 │
+│   contrôleurs ── schémas zod (contrat HTTP) ── gardes ── filtre      │
+│   gardes : AuthGuard (qui est-ce ?), puis RolesGuard (@Roles)        │
+│   modules métier : assemblent cas d'usage et workflow sur les ports  │
+│   ProductionAdaptersModule : branche chaque port sur son adaptateur  │
 └──────────────────────────────────────────────────────────────────────┘
-          │ cas d'usage, queries            │ workflow
-          ▼                                 ▼
-┌───────────────────────────┐   ┌──────────────────────────────────────┐
-│ libs/objective  auth  chat │◄──│ workflows/ai-assistant (type:workflow)│
-│ libs/ai     (type:domain)  │   │   machine XState, outils, acteurs     │
-└───────────────────────────┘   └──────────────────────────────────────┘
-          ▲  ports (classes abstraites)        ▲ IWorkflowStateRepository
-          │                                    │
+     │ connexion, rôles    │ cas d'usage, queries   │ workflow
+     ▼                     ▼                        ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────────┐
+│ libs/user  auth  │  │ libs/objective   │◄─│ workflows/ai-assistant   │
+│ (type:identity)  │  │ chat  ai         │  │ (type:workflow)          │
+│ la personne,     │  │ (type:domain)    │  │ machine XState, outils,  │
+│ ses rôles, la    │  │ ne voit que l'id │  │ acteurs                  │
+│ connexion        │  │ du propriétaire  │  │                          │
+└──────────────────┘  └──────────────────┘  └──────────────────────────┘
+     ▲                     ▲                        ▲ IWorkflowStateRepository
+     │ AuthProvider        │ ports du domaine       │
 ┌──────────────────────────────────────────────────────────────────────┐
-│ libs/supabase  libs/gemini  libs/claude  libs/firebase   (type:infra)│
+│ libs/supabase  libs/gemini  libs/claude  libs/firebase  (type:infra) │
 └──────────────────────────────────────────────────────────────────────┘
           tout dépend de libs/chore (type:kernel) : Result, CoreError, IdGenerator
 ```
@@ -38,10 +42,15 @@ l'application NestJS `apps/api`.
 | Tag | Projets | Peut dépendre de | Ne peut pas importer |
 |---|---|---|---|
 | `type:kernel` | `chore` | rien | SDK d'infrastructure, NestJS |
-| `type:domain` | `objective`, `auth`, `chat`, `ai` | `type:kernel` | un autre domaine, l'infrastructure, NestJS |
-| `type:workflow` | `ai-assistant` | `type:domain`, `type:kernel` | l'infrastructure, NestJS |
-| `type:infra` | `supabase`, `gemini`, `claude`, `firebase` | `type:domain`, `type:workflow`, `type:kernel` | — |
+| `type:domain` | `objective`, `chat`, `ai` | `type:kernel` | un autre domaine, l'identité, l'infrastructure, NestJS |
+| `type:identity` | `user`, `auth` | `type:identity`, `type:kernel` | le métier, l'infrastructure, NestJS |
+| `type:workflow` | `ai-assistant` | `type:domain`, `type:kernel` | l'identité, l'infrastructure, NestJS |
+| `type:infra` | `supabase`, `gemini`, `claude`, `firebase` | `type:domain`, `type:identity`, `type:workflow`, `type:kernel` | — |
 | `type:app` | `api` | tout | — |
+
+Le métier ne voit jamais la personne ni ses rôles : il ne reçoit que l'id du propriétaire
+([ADR 0002](./adr/0002-acces-aux-donnees.md)), et les rôles sont vérifiés à l'entrée de l'API
+([ADR 0008](./adr/0008-roles.md)). `auth` dépend de `user`, jamais l'inverse.
 
 Les doublures de test (`@org/<lib>/testing`) ne peuvent être importées que par des tests. Les
 lectures BFF (`@org/<lib>/bff`) ne peuvent être importées que par l'infrastructure qui les
@@ -62,8 +71,11 @@ domaine, rien hors du dossier `bff/` ne les lit.
   [`technical/queries.md`](./technical/queries.md)).
 - **Ports** : `protocols/*.ts` (repositories, fournisseurs). Chaque port reçoit le propriétaire
   ([ADR 0002](./adr/0002-acces-aux-donnees.md)).
+- **Rôles** : `Role`, `parseRoles` et `hasAnyRole` dans `libs/user` ; lus par l'adaptateur
+  Supabase dans `app_metadata.roles` ; vérifiés par `RolesGuard` sur les routes marquées
+  `@Roles([...])` ([ADR 0008](./adr/0008-roles.md)).
 - **Adaptateurs** : `libs/supabase`, `libs/gemini`, `libs/claude`, `libs/firebase`. Le fournisseur
-  d'IA (Gemini ou Claude) se choisit par `AI_PROVIDER` ([ADR 0008](./adr/0008-fournisseur-claude.md)).
+  d'IA (Gemini ou Claude) se choisit par `AI_PROVIDER` ([ADR 0009](./adr/0009-fournisseur-claude.md)).
 - **Workflow de l'assistant** : `workflows/ai-assistant` ([ADR 0004](./adr/0004-orchestrateur.md),
   [PRD](./features/send-message-to-ai-prd.md)).
 - **Racine de composition** : `apps/api/src/adapters/production-adapters.module.ts` (ports →

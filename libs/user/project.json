@@ -1,0 +1,10 @@
+{
+  "name": "user",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/user/src",
+  "projectType": "library",
+  "tags": ["type:identity"],
+  "targets": {
+    "typecheck": {}
+  }
+}

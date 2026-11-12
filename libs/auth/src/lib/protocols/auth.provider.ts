@@ -1,5 +1,5 @@
+import { User } from '@org/user';
 import { AuthSession } from '../models/auth-session';
-import { User } from '../models/user';
 
 export type Registration = {
   user: User;

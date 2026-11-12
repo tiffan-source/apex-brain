@@ -1,11 +1,15 @@
+import { Role, User } from '@org/user';
 import { AuthSession } from './auth-session';
-import { User } from './user';
 
-/** La personne telle que les cas d'usage la rendent : son nom d'affichage, à défaut son e-mail. */
+/**
+ * La personne telle que les cas d'usage la rendent : son nom d'affichage, à défaut son e-mail, et
+ * ses rôles (vides pour un compte de base).
+ */
 export type AuthenticatedUserOutput = {
   id: string;
   name: string;
   email: string;
+  roles: Role[];
 };
 
 export type AuthSessionOutput = {
@@ -24,6 +28,7 @@ export function toAuthenticatedUserOutput(user: User): AuthenticatedUserOutput {
     id: user.uid,
     name: user.displayName ?? user.email,
     email: user.email,
+    roles: [...user.roles],
   };
 }
 

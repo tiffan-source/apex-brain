@@ -1,4 +1,4 @@
-import type { DynamicModule, INestApplication } from '@nestjs/common';
+import type { DynamicModule, INestApplication, Type } from '@nestjs/common';
 import { Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { InteractiveAIProvider } from '@org/ai';
@@ -13,6 +13,7 @@ import { SequentialIdGenerator } from '@org/chore/testing';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import { createInMemoryObjectiveInfrastructure } from '@org/objective/testing';
+import type { Role } from '@org/user';
 import request from 'supertest';
 import { PORTS } from '../../src/adapters/ports';
 import { AppModule } from '../../src/app.module';
@@ -38,13 +39,16 @@ export const TEST_ENVIRONMENT = {
 class InMemoryAdaptersModule {}
 
 export type TestAppOptions = {
+  /** Des modules propres à un test (des routes qui n'existent que pour lui). */
+  modules?: Type[];
   /** Un autre fournisseur d'IA que l'IA scriptée (`ai`) : l'adaptateur Claude sur un SDK simulé. */
   aiProvider?: InteractiveAIProvider;
 };
 
 /**
- * L'application complète (modules, garde, validation, filtre d'erreurs, configuration HTTP),
- * branchée sur des doublures en mémoire à la place de Supabase, Gemini et Firestore.
+ * L'application complète (modules, gardes, validation, filtre d'erreurs, configuration HTTP),
+ * branchée sur des doublures en mémoire à la place de Supabase, Gemini et Firestore. `modules`
+ * ajoute des modules propres à un test (des routes qui n'existent que pour lui).
  */
 export async function createTestApp(
   environmentOverrides: Record<string, string> = {},
@@ -82,7 +86,7 @@ export async function createTestApp(
 
   const environment: Environment = loadEnvironment({ ...TEST_ENVIRONMENT, ...environmentOverrides });
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.register({ environment, adapters })],
+    imports: [AppModule.register({ environment, adapters }), ...(options.modules ?? [])],
   }).compile();
 
   const app: INestApplication = moduleRef.createNestApplication({ logger: false });
@@ -91,9 +95,9 @@ export async function createTestApp(
 
   const http = () => request(app.getHttpServer());
 
-  /** Créer une personne et rendre de quoi appeler l'API en son nom. */
-  const signIn = (email: string) => {
-    const { id, accessToken } = auth.seedAccount(email, 'secret123');
+  /** Créer une personne (avec des rôles, si besoin) et rendre de quoi appeler l'API en son nom. */
+  const signIn = (email: string, roles: readonly Role[] = []) => {
+    const { id, accessToken } = auth.seedAccount(email, 'secret123', { roles });
     return { id, accessToken, authorization: `Bearer ${accessToken}` };
   };
 

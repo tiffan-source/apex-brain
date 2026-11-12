@@ -24,6 +24,7 @@ export const ERROR_STATUS: Readonly<Record<string, HttpStatus>> = {
   INVALID_CREDENTIALS: HttpStatus.UNAUTHORIZED,
   INVALID_SESSION: HttpStatus.UNAUTHORIZED,
   EMAIL_NOT_CONFIRMED: HttpStatus.FORBIDDEN,
+  FORBIDDEN: HttpStatus.FORBIDDEN,
   NOT_FOUND: HttpStatus.NOT_FOUND,
   OBJECTIVE_NOT_FOUND: HttpStatus.NOT_FOUND,
   TASK_NOT_FOUND: HttpStatus.NOT_FOUND,
@@ -55,6 +56,14 @@ export class DomainFailureException extends HttpException {
 /** La requête n'a pas de jeton valide. */
 export function unauthenticated(): DomainFailureException {
   return new DomainFailureException({ code: 'UNAUTHENTICATED', message: 'Missing or invalid access token' });
+}
+
+/** La personne est connectée, mais aucun de ses rôles n'ouvre cette route. */
+export function forbidden(): DomainFailureException {
+  return new DomainFailureException({
+    code: 'FORBIDDEN',
+    message: 'None of your roles grants access to this route',
+  });
 }
 
 /** Le corps, les paramètres ou la requête ne respectent pas le contrat. */

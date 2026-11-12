@@ -26,7 +26,8 @@ apex-brain/
 ├── apps/api/                 Application NestJS : racine de composition + adaptateurs HTTP
 ├── libs/chore/               Noyau partagé : Result, runWithResult, CoreError, IdGenerator
 ├── libs/objective/           Domaine objectifs / étapes / pas
-├── libs/auth/                Domaine authentification
+├── libs/auth/                Authentification (identité)
+├── libs/user/                La personne et ses rôles (identité)
 ├── libs/chat/                Domaine conversation
 ├── libs/ai/                  Capacité générique de génération IA (port)
 ├── libs/supabase/            Adaptateurs Supabase (données + auth)
@@ -188,7 +189,7 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - [x] `libs/gemini` : SDK direct, traduction des erreurs.
 - [x] `libs/claude` : SDK Anthropic direct (API Messages), historique des interactions gardé côté
       serveur (Firestore ou mémoire), cache de prompt, traduction des erreurs ; choix du fournisseur
-      par `AI_PROVIDER` ([ADR 0008](./adr/0008-fournisseur-claude.md)).
+      par `AI_PROVIDER` ([ADR 0009](./adr/0009-fournisseur-claude.md)).
 - [x] `libs/firebase` : `firebase-admin`, contexte et snapshot en JSON, anciens documents lisibles.
 - [x] `supabase/` : migrations reprises d'Apex (sans l'edge function), plus les `GRANT` explicites.
 
@@ -222,6 +223,10 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Base de données** : lancer Supabase depuis `apex-brain` et retirer `supabase/` d'Apex une
   fois le client migré ; verrouiller les règles Firestore (le navigateur n'y écrit plus).
 - **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE.
+- **Rôles** ([ADR 0008](./adr/0008-roles.md)) : `admin` et `premium`, lus dans
+  `app_metadata.roles`, rendus par `/v2/auth/me`, vérifiés par `@Roles` et `RolesGuard`. Aucune
+  route n'est encore réservée. Restent à décider : les routes à réserver, et comment premium
+  s'obtient (un paiement en ferait peut-être une offre avec échéance plutôt qu'un rôle).
 - **Étapes et pas sans ordre** : ils sont indépendants, aucun n'en attend un autre. Une étape est
   faite ou non faite, rien d'autre. Seul Akari le dérive encore (au moins un pas, tous faits :
   instructions, `getObjectiveTree`) ; depuis le retrait de la v1, l'API rend la colonne en base.
@@ -249,7 +254,7 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
   « empty response body ») et, pour un refus de la clé, la variable à vérifier. L'appel réel à
   Claude n'est pas vérifié non plus : son SDK l'est face à un faux serveur HTTP (`POST /v1/messages`,
   clé dans `Authorization`, version de l'API, lecture des réponses et des refus).
-- **Historique des échanges avec Claude** (`ai-interaction-histories`, ADR 0008) : rien ne le
+- **Historique des échanges avec Claude** (`ai-interaction-histories`, ADR 0009) : rien ne le
   supprime, pas même la suppression de l'objectif. Expiration (TTL Firestore) et effacement avec
   l'objectif à prévoir.
 - **Interactions conservées par Gemini** : 1 jour sur le palier gratuit, 55 jours sur le palier

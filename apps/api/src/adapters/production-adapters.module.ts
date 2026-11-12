@@ -62,7 +62,7 @@ export class ProductionAdaptersModule {
     const inMemory = environment.WORKFLOW_STATE_STORE === 'memory';
 
     // L'API Messages de Claude ne garde rien d'un appel à l'autre : l'historique des échanges est
-    // rangé avec l'état des workflows (docs/adr/0008-fournisseur-claude.md).
+    // rangé avec l'état des workflows (docs/adr/0009-fournisseur-claude.md).
     const claude = () =>
       new ClaudeInteractiveAIProvider(
         createClaudeMessagesClient(environment.ANTHROPIC_API_KEY as string),

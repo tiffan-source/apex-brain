@@ -23,7 +23,12 @@ describe('Authentification (e2e)', () => {
 
     expect(response.status).toBe(201);
     const body = registeredResponseSchema.parse(response.body);
-    expect(body.user).toEqual({ id: expect.any(String), email: 'alice@apex.test', name: 'alice@apex.test' });
+    expect(body.user).toEqual({
+      id: expect.any(String),
+      email: 'alice@apex.test',
+      name: 'alice@apex.test',
+      roles: [],
+    });
     expect(body.session).not.toBeNull();
   });
 
@@ -56,7 +61,7 @@ describe('Authentification (e2e)', () => {
   });
 
   it('connecte, reconnaît, renouvelle et déconnecte (LogUserIn, GetCurrentUser, RefreshSession, LogUserOut)', async () => {
-    t.auth.seedAccount('alice@apex.test', 'secret123', 'Alice');
+    t.auth.seedAccount('alice@apex.test', 'secret123', { displayName: 'Alice' });
 
     const wrong = await t.http().post('/v2/auth/login').send({ email: 'alice@apex.test', password: 'faux' });
     expect(wrong.status).toBe(401);
@@ -94,6 +99,17 @@ describe('Authentification (e2e)', () => {
       .get('/v2/auth/me')
       .set('Authorization', `Bearer ${renewed.accessToken}`);
     expect(afterLogout.status).toBe(401);
+  });
+
+  it('rend les rôles de la personne (GetCurrentUser)', async () => {
+    const basic = t.signIn('basique@apex.test');
+    const premium = t.signIn('premium@apex.test', ['premium']);
+
+    const basicMe = await t.http().get('/v2/auth/me').set('Authorization', basic.authorization);
+    const premiumMe = await t.http().get('/v2/auth/me').set('Authorization', premium.authorization);
+
+    expect(userResponseSchema.parse(basicMe.body).roles).toEqual([]);
+    expect(userResponseSchema.parse(premiumMe.body).roles).toEqual(['premium']);
   });
 
   it('exige un jeton valide sur toute route qui n’est pas publique', async () => {
