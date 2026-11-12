@@ -26,7 +26,8 @@ apex-brain/
 ├── apps/api/                 Application NestJS : racine de composition + adaptateurs HTTP
 ├── libs/chore/               Noyau partagé : Result, runWithResult, CoreError, IdGenerator
 ├── libs/objective/           Domaine objectifs / étapes / pas
-├── libs/auth/                Domaine authentification
+├── libs/auth/                Authentification (identité)
+├── libs/user/                La personne et ses rôles (identité)
 ├── libs/chat/                Domaine conversation
 ├── libs/ai/                  Capacité générique de génération IA (port)
 ├── libs/supabase/            Adaptateurs Supabase (données + auth)
@@ -218,6 +219,10 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Base de données** : lancer Supabase depuis `apex-brain` et retirer `supabase/` d'Apex une
   fois le client migré ; verrouiller les règles Firestore (le navigateur n'y écrit plus).
 - **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE.
+- **Rôles** ([ADR 0008](./adr/0008-roles.md)) : `admin` et `premium`, lus dans
+  `app_metadata.roles`, rendus par `/v2/auth/me`, vérifiés par `@Roles` et `RolesGuard`. Aucune
+  route n'est encore réservée. Restent à décider : les routes à réserver, et comment premium
+  s'obtient (un paiement en ferait peut-être une offre avec échéance plutôt qu'un rôle).
 - **Étapes et pas sans ordre** : ils sont indépendants, aucun n'en attend un autre. Une étape est
   faite ou non faite, rien d'autre. Seul Akari le dérive encore (au moins un pas, tous faits :
   instructions, `getObjectiveTree`) ; depuis le retrait de la v1, l'API rend la colonne en base.

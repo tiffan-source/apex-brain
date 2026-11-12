@@ -11,6 +11,9 @@ générer un client typé). Ce document-ci en donne la vue d'ensemble et les rè
   `404 NOT_FOUND` ([ADR 0007](./adr/0007-retrait-de-la-v1.md)).
 - **Authentification** : `Authorization: Bearer <accessToken>` sur toute route sauf
   `/v2/auth/register`, `/v2/auth/login`, `/v2/auth/refresh` et `/health`.
+- **Rôles** : une personne a des rôles (`admin`, `premium`), aucun pour un compte de base. Une
+  route réservée répond `403 FORBIDDEN` à une personne connectée dont aucun rôle ne l'ouvre ; aucune
+  route n'est réservée pour l'instant ([ADR 0008](./adr/0008-roles.md)).
 - **Corps** : JSON. Les dates en entrée acceptent `2027-04-01` ou un instant ISO 8601 ; en sortie,
   ce sont des instants ISO 8601 (`2027-04-01T00:00:00.000Z`).
 - **Réponses** : le corps d'une réponse réussie est la sortie du cas d'usage, telle quelle (mêmes
@@ -37,7 +40,7 @@ Le **code** est le contrat : le client choisit sa phrase d'après lui. Le **mess
 |---|---|
 | 400 | `VALIDATION_ERROR`, `BAD_REQUEST` (JSON illisible), `WEAK_PASSWORD`, `INVALID_EMAIL` |
 | 401 | `UNAUTHENTICATED` (jeton absent ou invalide), `INVALID_CREDENTIALS`, `INVALID_SESSION` |
-| 403 | `EMAIL_NOT_CONFIRMED` |
+| 403 | `EMAIL_NOT_CONFIRMED`, `FORBIDDEN` (aucun rôle de la personne n'ouvre la route) |
 | 404 | `OBJECTIVE_NOT_FOUND`, `TASK_NOT_FOUND`, `CONVERSATION_NOT_FOUND`, `NOT_FOUND` (route) |
 | 409 | `USER_ALREADY_EXIST`, `WORKFLOW_BUSY`, `NO_PENDING_PERMISSION` |
 | 429 | `TOO_MANY_REQUESTS` |
@@ -51,10 +54,11 @@ Le **code** est le contrat : le client choisit sa phrase d'après lui. Le **mess
 | `POST /v2/auth/login` | `LogUserInUseCase` | `{ email, password }` | `200 { user, session }` |
 | `POST /v2/auth/refresh` | `RefreshSessionUseCase` | `{ refreshToken }` | `200 { user, session }` |
 | `POST /v2/auth/logout` | `LogUserOutUseCase` | — | `204` |
-| `GET /v2/auth/me` | `GetCurrentUserUseCase` | — | `200 { id, name, email }` |
+| `GET /v2/auth/me` | `GetCurrentUserUseCase` | — | `200 { id, name, email, roles }` |
 
-`user` vaut `{ id, name, email }` (`name` : le nom d'affichage, à défaut l'e-mail) ; `session`
-vaut `{ accessToken, refreshToken, expiresAt }`. `session` est `null` à l'inscription tant que
+`user` vaut `{ id, name, email, roles }` (`name` : le nom d'affichage, à défaut l'e-mail ;
+`roles` : `admin`, `premium`, vide pour un compte de base, lus dans le jeton : un rôle donné compte
+au prochain renouvellement) ; `session` vaut `{ accessToken, refreshToken, expiresAt }`. `session` est `null` à l'inscription tant que
 l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt` ou sur un `401`.
 
 ## Objectifs, étapes et pas (v2)

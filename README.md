@@ -38,15 +38,16 @@ Tout passe par Nx (`npx nx …`), comme dans Apex.
 | Seulement ce qui a changé | `npx nx affected -t vite:test lint typecheck` |
 | Intégration contre le Supabase local | `npx nx run api:test-integration` (variables de `supabase status -o env`) |
 
-Projets : `api`, `chore`, `objective`, `auth`, `chat`, `ai`, `supabase`, `gemini`, `firebase`,
-`ai-assistant`.
+Projets : `api`, `chore`, `objective`, `user`, `auth`, `chat`, `ai`, `supabase`, `gemini`,
+`firebase`, `ai-assistant`.
 
 ## Structure
 
 ```text
 apps/api/                 Application NestJS : racine de composition et adaptateurs HTTP
 libs/chore/               Noyau partagé (Result, CoreError, IdGenerator)
-libs/objective|auth|chat/ Domaines : cas d'usage, ports, modèles, queries, erreurs
+libs/objective|chat/      Domaines : cas d'usage, ports, modèles, queries, erreurs
+libs/user|auth/           Identité : la personne, ses rôles, la connexion
 libs/ai/                  Capacité générique de génération IA
 libs/supabase|gemini|firebase/  Adaptateurs d'infrastructure
 workflows/ai-assistant/   Orchestrateur XState de l'assistant
