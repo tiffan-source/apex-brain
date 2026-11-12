@@ -67,4 +67,27 @@ describe('loadEnvironment', () => {
       'memory',
     );
   });
+
+  it("garde Gemini par défaut, et n'exige que la clé du fournisseur d'IA choisi", () => {
+    const { GEMINI_API_KEY: _unused, ...withoutGemini } = minimal;
+
+    expect(loadEnvironment(minimal)).toMatchObject({ AI_PROVIDER: 'gemini', GEMINI_API_KEY: 'gemini' });
+    expect(
+      loadEnvironment({ ...withoutGemini, AI_PROVIDER: 'claude', ANTHROPIC_API_KEY: 'sk-ant-test' }),
+    ).toMatchObject({
+      AI_PROVIDER: 'claude',
+      ANTHROPIC_API_KEY: 'sk-ant-test',
+      CLAUDE_MODEL: 'claude-sonnet-5-5',
+    });
+  });
+
+  it('exige la clé Anthropic quand le fournisseur est Claude, même avec d’autres variables invalides', () => {
+    expect(() => loadEnvironment({ ...minimal, AI_PROVIDER: 'claude' })).toThrow(
+      /ANTHROPIC_API_KEY : requis quand AI_PROVIDER=claude/,
+    );
+    expect(() => loadEnvironment({ ...minimal, AI_PROVIDER: 'claude', SUPABASE_URL: 'pas une url' })).toThrow(
+      /SUPABASE_URL[\s\S]*ANTHROPIC_API_KEY/,
+    );
+    expect(() => loadEnvironment({ ...minimal, AI_PROVIDER: 'openai' })).toThrow(/AI_PROVIDER/);
+  });
 });

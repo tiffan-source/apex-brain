@@ -30,7 +30,7 @@ l'application NestJS `apps/api`.
      ▲                     ▲                        ▲ IWorkflowStateRepository
      │ AuthProvider        │ ports du domaine       │
 ┌──────────────────────────────────────────────────────────────────────┐
-│ libs/supabase   libs/gemini   libs/firebase   (type:infra)           │
+│ libs/supabase  libs/gemini  libs/claude  libs/firebase  (type:infra) │
 └──────────────────────────────────────────────────────────────────────┘
           tout dépend de libs/chore (type:kernel) : Result, CoreError, IdGenerator
 ```
@@ -45,7 +45,7 @@ l'application NestJS `apps/api`.
 | `type:domain` | `objective`, `chat`, `ai` | `type:kernel` | un autre domaine, l'identité, l'infrastructure, NestJS |
 | `type:identity` | `user`, `auth` | `type:identity`, `type:kernel` | le métier, l'infrastructure, NestJS |
 | `type:workflow` | `ai-assistant` | `type:domain`, `type:kernel` | l'identité, l'infrastructure, NestJS |
-| `type:infra` | `supabase`, `gemini`, `firebase` | `type:domain`, `type:identity`, `type:workflow`, `type:kernel` | — |
+| `type:infra` | `supabase`, `gemini`, `claude`, `firebase` | `type:domain`, `type:identity`, `type:workflow`, `type:kernel` | — |
 | `type:app` | `api` | tout | — |
 
 Le métier ne voit jamais la personne ni ses rôles : il ne reçoit que l'id du propriétaire
@@ -74,7 +74,8 @@ domaine, rien hors du dossier `bff/` ne les lit.
 - **Rôles** : `Role`, `parseRoles` et `hasAnyRole` dans `libs/user` ; lus par l'adaptateur
   Supabase dans `app_metadata.roles` ; vérifiés par `RolesGuard` sur les routes marquées
   `@Roles([...])` ([ADR 0008](./adr/0008-roles.md)).
-- **Adaptateurs** : `libs/supabase`, `libs/gemini`, `libs/firebase`.
+- **Adaptateurs** : `libs/supabase`, `libs/gemini`, `libs/claude`, `libs/firebase`. Le fournisseur
+  d'IA (Gemini ou Claude) se choisit par `AI_PROVIDER` ([ADR 0009](./adr/0009-fournisseur-claude.md)).
 - **Workflow de l'assistant** : `workflows/ai-assistant` ([ADR 0004](./adr/0004-orchestrateur.md),
   [PRD](./features/send-message-to-ai-prd.md)).
 - **Racine de composition** : `apps/api/src/adapters/production-adapters.module.ts` (ports →
@@ -108,8 +109,8 @@ domaine, rien hors du dossier `bff/` ne les lit.
 | Niveau | Où | Ce qu'ils remplacent | Commande |
 |---|---|---|---|
 | Unitaires | `libs/*/src/**/*.spec.ts`, `workflows/*/src/**/*.spec.ts` | toute l'infrastructure (doublures en mémoire) | `npx nx run-many -t vite:test` |
-| e2e HTTP | `apps/api/test/*.e2e.spec.ts` | Supabase, Gemini, Firestore | `npx nx vite:test api` |
-| Intégration | `libs/supabase/src/integration/`, `apps/api/test/integration/` | Gemini (IA scriptée), Firestore (mémoire) | `npx nx run api:test-integration` et `SUPABASE_INTEGRATION=1 npx nx vite:test supabase`, après `supabase start` |
+| e2e HTTP | `apps/api/test/*.e2e.spec.ts` | Supabase, Gemini et Claude (ou le SDK de Claude seul), Firestore | `npx nx vite:test api` |
+| Intégration | `libs/supabase/src/integration/`, `apps/api/test/integration/` | l'IA (scriptée), Firestore (mémoire) | `npx nx run api:test-integration` et `SUPABASE_INTEGRATION=1 npx nx vite:test supabase`, après `supabase start` |
 
 Les doublures en mémoire suivent les règles des vrais adaptateurs (filtre par propriétaire,
 refus d'écraser la ligne d'un autre, un même id deux fois dans une écriture refusé comme par

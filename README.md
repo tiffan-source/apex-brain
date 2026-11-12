@@ -3,7 +3,7 @@
 Le serveur d'Apex : une API REST NestJS qui délivre toutes les capacités métier d'Apex
 (objectifs, étapes, pas, focus du jour, conversation, assistant Akari) au client web et au client
 mobile. Un seul dépôt, un seul cerveau : la logique métier, la résolution des dépendances
-(Supabase, Gemini, Firebase) et l'orchestrateur XState vivent ici.
+(Supabase, Gemini ou Claude, Firebase) et l'orchestrateur XState vivent ici.
 
 - [Plan et état d'avancement](docs/plan.md)
 - [Architecture](docs/architecture.md) et [décisions](docs/adr/)
@@ -39,7 +39,7 @@ Tout passe par Nx (`npx nx …`), comme dans Apex.
 | Intégration contre le Supabase local | `npx nx run api:test-integration` (variables de `supabase status -o env`) |
 
 Projets : `api`, `chore`, `objective`, `user`, `auth`, `chat`, `ai`, `supabase`, `gemini`,
-`firebase`, `ai-assistant`.
+`claude`, `firebase`, `ai-assistant`.
 
 ## Structure
 
@@ -49,7 +49,7 @@ libs/chore/               Noyau partagé (Result, CoreError, IdGenerator)
 libs/objective|chat/      Domaines : cas d'usage, ports, modèles, queries, erreurs
 libs/user|auth/           Identité : la personne, ses rôles, la connexion
 libs/ai/                  Capacité générique de génération IA
-libs/supabase|gemini|firebase/  Adaptateurs d'infrastructure
+libs/supabase|gemini|claude|firebase/  Adaptateurs d'infrastructure
 workflows/ai-assistant/   Orchestrateur XState de l'assistant
 supabase/                 Schéma de la base (migrations)
 docs/                     Plan, architecture, décisions, contrat de l'API
