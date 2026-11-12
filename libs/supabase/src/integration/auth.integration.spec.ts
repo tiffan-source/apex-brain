@@ -50,6 +50,18 @@ describe.skipIf(!integrationEnabled)('Supabase — authentification (intégratio
     await expect(auth.refresh(renewed.refreshToken)).rejects.toMatchObject({ code: 'INVALID_SESSION' });
   });
 
+  it('lit les rôles dans app_metadata, à la connexion comme dans le jeton', async () => {
+    const premium = await createTestUser('premium', { roles: ['premium', 'inconnu'] });
+    const basic = await createTestUser('basique');
+
+    const session = await auth.login(premium.email, premium.password);
+    expect(session.user.roles).toEqual(['premium']);
+    expect((await auth.whoAmI(session.accessToken))?.roles).toEqual(['premium']);
+
+    const basicSession = await auth.login(basic.email, basic.password);
+    expect((await auth.whoAmI(basicSession.accessToken))?.roles).toEqual([]);
+  });
+
   it("ne reconnaît ni un jeton mal formé, ni une clé d'API", async () => {
     const { publishableKey, secretKey } = integrationConfig();
 

@@ -1,6 +1,5 @@
 export * from './lib/protocols/auth.provider';
 
-export * from './lib/models/user';
 export * from './lib/models/auth-session';
 export * from './lib/models/auth.outputs';
 

@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AssistantModule } from './assistant/assistant.module';
 import { AuthGuard } from './auth/auth.guard';
 import { AuthModule } from './auth/auth.module';
+import { RolesGuard } from './auth/roles.guard';
 import { ConfigurationModule } from './config/configuration.module';
 import type { Environment } from './config/environment';
 import { APP_ENVIRONMENT } from './config/environment';
@@ -43,9 +44,11 @@ export class AppModule {
       ],
       controllers: [HealthController],
       providers: [
-        // L'ordre compte : la garde d'authentification identifie la personne, puis la limitation de
-        // débit compte ses requêtes (par personne plutôt que par adresse IP).
+        // L'ordre compte : la garde d'authentification identifie la personne, la garde des rôles
+        // vérifie qu'elle peut ouvrir la route, puis la limitation de débit compte ses requêtes (par
+        // personne plutôt que par adresse IP).
         { provide: APP_GUARD, useClass: AuthGuard },
+        { provide: APP_GUARD, useClass: RolesGuard },
         { provide: APP_GUARD, useClass: ThrottlerGuard },
         { provide: APP_FILTER, useClass: ApiExceptionFilter },
         { provide: APP_PIPE, useFactory: createValidationPipe },

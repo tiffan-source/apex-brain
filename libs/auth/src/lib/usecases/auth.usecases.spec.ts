@@ -30,6 +30,7 @@ describe("Cas d'usage d'authentification", () => {
         id: expect.any(String),
         name: 'alice@apex.test',
         email: 'alice@apex.test',
+        roles: [],
       });
       expect(result.data.session.expiresAt).toBeInstanceOf(Date);
       await expect(me.execute({ accessToken: result.data.session.accessToken })).resolves.toEqual({
@@ -69,7 +70,7 @@ describe("Cas d'usage d'authentification", () => {
   describe('LogUserInUseCase', () => {
     it("ouvre une session avec le nom d'affichage de la personne", async () => {
       const { provider, login } = setup();
-      provider.seedAccount('alice@apex.test', 'secret123', 'Alice');
+      provider.seedAccount('alice@apex.test', 'secret123', { displayName: 'Alice' });
 
       const result = await login.execute({ email: 'alice@apex.test', password: 'secret123' });
 
@@ -77,6 +78,15 @@ describe("Cas d'usage d'authentification", () => {
         success: true,
         data: { user: { name: 'Alice', email: 'alice@apex.test' } },
       });
+    });
+
+    it('rend les rôles de la personne', async () => {
+      const { provider, login } = setup();
+      provider.seedAccount('alice@apex.test', 'secret123', { roles: ['premium'] });
+
+      const result = await login.execute({ email: 'alice@apex.test', password: 'secret123' });
+
+      expect(result).toMatchObject({ success: true, data: { user: { roles: ['premium'] } } });
     });
 
     it('signale INVALID_CREDENTIALS sans dire ce qui ne va pas', async () => {
@@ -121,6 +131,20 @@ describe("Cas d'usage d'authentification", () => {
       await expect(refresh.execute({ refreshToken })).resolves.toMatchObject({
         success: false,
         error: { code: 'INVALID_SESSION' },
+      });
+    });
+  });
+
+  describe('GetCurrentUserUseCase', () => {
+    it('rend la personne derrière le jeton, avec ses rôles', async () => {
+      const { provider, me } = setup();
+      const { id, accessToken } = provider.seedAccount('alice@apex.test', 'secret123', {
+        roles: ['admin'],
+      });
+
+      await expect(me.execute({ accessToken })).resolves.toEqual({
+        success: true,
+        data: { id, name: 'alice@apex.test', email: 'alice@apex.test', roles: ['admin'] },
       });
     });
   });

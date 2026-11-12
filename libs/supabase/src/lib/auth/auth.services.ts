@@ -1,4 +1,5 @@
-import { AuthProvider, AuthSession, Registration, User, UserAlreadyExistError } from '@org/auth';
+import { AuthProvider, AuthSession, Registration, UserAlreadyExistError } from '@org/auth';
+import { parseRoles, User } from '@org/user';
 import {
   isAuthRetryableFetchError,
   isAuthSessionMissingError,
@@ -13,6 +14,7 @@ type Claims = {
   email?: string;
   role?: string;
   user_metadata?: Record<string, unknown>;
+  app_metadata?: Record<string, unknown>;
 };
 
 /**
@@ -99,6 +101,8 @@ export class SupabaseAuthServices implements AuthProvider {
     const user = new User(claims.sub, claims.email ?? '');
     const displayName = displayNameOf(claims.user_metadata);
     if (displayName) user.setDisplayName(displayName);
+    // Les rôles du jeton : un rôle donné ou retiré ne compte qu'au prochain renouvellement.
+    user.setRoles(rolesOf(claims.app_metadata));
     return user;
   }
 }
@@ -117,11 +121,20 @@ function displayNameOf(metadata: Record<string, unknown> | undefined): string | 
   return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : undefined;
 }
 
+/**
+ * Les rôles vivent dans `app_metadata`, que seule la clé secrète modifie. Jamais dans
+ * `user_metadata` : la personne peut le réécrire elle-même (voir docs/adr/0008-roles.md).
+ */
+function rolesOf(appMetadata: Record<string, unknown> | undefined) {
+  return parseRoles(appMetadata?.['roles']);
+}
+
 function toUser(supabaseUser: SupabaseUser): User {
   const user = new User(supabaseUser.id, supabaseUser.email ?? '');
   user.setEmailVerified(Boolean(supabaseUser.email_confirmed_at));
   const displayName = displayNameOf(supabaseUser.user_metadata);
   if (displayName) user.setDisplayName(displayName);
+  user.setRoles(rolesOf(supabaseUser.app_metadata));
   return user;
 }
 
