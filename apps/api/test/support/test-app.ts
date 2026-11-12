@@ -1,4 +1,4 @@
-import type { DynamicModule, INestApplication } from '@nestjs/common';
+import type { DynamicModule, INestApplication, Type } from '@nestjs/common';
 import { Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { InteractiveAIProvider } from '@org/ai';
@@ -39,10 +39,14 @@ export const TEST_ENVIRONMENT = {
 class InMemoryAdaptersModule {}
 
 /**
- * L'application complète (modules, garde, validation, filtre d'erreurs, configuration HTTP),
- * branchée sur des doublures en mémoire à la place de Supabase, Gemini et Firestore.
+ * L'application complète (modules, gardes, validation, filtre d'erreurs, configuration HTTP),
+ * branchée sur des doublures en mémoire à la place de Supabase, Gemini et Firestore. `modules`
+ * ajoute des modules propres à un test (des routes qui n'existent que pour lui).
  */
-export async function createTestApp(environmentOverrides: Record<string, string> = {}) {
+export async function createTestApp(
+  environmentOverrides: Record<string, string> = {},
+  options: { modules?: Type[] } = {},
+) {
   const objectives = createInMemoryObjectiveInfrastructure();
   const chat = createInMemoryChatInfrastructure();
   const auth = new InMemoryAuthProvider();
@@ -75,7 +79,7 @@ export async function createTestApp(environmentOverrides: Record<string, string>
 
   const environment: Environment = loadEnvironment({ ...TEST_ENVIRONMENT, ...environmentOverrides });
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule.register({ environment, adapters })],
+    imports: [AppModule.register({ environment, adapters }), ...(options.modules ?? [])],
   }).compile();
 
   const app: INestApplication = moduleRef.createNestApplication({ logger: false });
