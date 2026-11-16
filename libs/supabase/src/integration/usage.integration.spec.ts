@@ -1,5 +1,7 @@
 import { SupabaseUsagePolicySource } from '../lib/usage/usage-policy.source';
-import { createIntegrationAccess, integrationEnabled } from './supabase-test-environment';
+import { createIntegrationAccess, createTestUser, integrationEnabled } from './supabase-test-environment';
+
+const TABLES = ['usage_policies', 'usage_actions'] as const;
 
 describe.skipIf(!integrationEnabled)("Supabase — politiques d'usage (intégration)", () => {
   it('lit les politiques livrées par la migration, par action puis par rôle', async () => {
@@ -16,13 +18,40 @@ describe.skipIf(!integrationEnabled)("Supabase — politiques d'usage (intégrat
     );
   });
 
-  it('ne les ouvre à aucun client : la clé publique ne lit ni les politiques, ni le catalogue', async () => {
-    const client = createIntegrationAccess().createAuthClient();
+  it("n'en laisse lire aucune ligne à un client, connecté ou non", async () => {
+    const anonymous = createIntegrationAccess().createAuthClient();
+    const person = await createTestUser('lecture-politiques');
+    const signedIn = createIntegrationAccess().createAuthClient();
+    await signedIn.auth.signInWithPassword({ email: person.email, password: person.password });
 
-    for (const table of ['usage_policies', 'usage_actions'] as const) {
-      const { data, error } = await client.from(table).select('*');
-      expect(data).toBeNull();
-      expect(error).toMatchObject({ code: '42501' });
+    for (const client of [anonymous, signedIn]) {
+      for (const table of TABLES) {
+        const { data, error } = await client.from(table).select('*');
+        // Selon les droits par défaut de la base : refus de la table (42501), ou table lisible mais la RLS,
+        // sans aucune politique, ne laisse passer aucune ligne. Dans les deux cas, rien n'est lu.
+        if (error) expect(error.code).toBe('42501');
+        expect(data ?? []).toEqual([]);
+      }
     }
+  });
+
+  it("ne laisse pas une personne connectée s'offrir des messages en modifiant les politiques", async () => {
+    const person = await createTestUser('triche-politiques');
+    const client = createIntegrationAccess().createAuthClient();
+    await client.auth.signInWithPassword({ email: person.email, password: person.password });
+
+    await client.from('usage_policies').update({ quota: 1000 }).eq('role', 'standard');
+    await client.from('usage_policies').delete().eq('action', 'assistant.send-message');
+
+    const policies = await new SupabaseUsagePolicySource(createIntegrationAccess()).forAction(
+      'assistant.send-message',
+    );
+    expect(policies).toContainEqual({
+      action: 'assistant.send-message',
+      role: 'standard',
+      quota: 3,
+      period: 'lifetime',
+    });
+    expect(policies).toHaveLength(3);
   });
 });

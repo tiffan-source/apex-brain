@@ -34,9 +34,12 @@ comment on table public.usage_policies is
   'accès à une action nommée ici ; le plus généreux des rôles d''une personne l''emporte.';
 
 -- Lues par le serveur seulement (clé secrète) : aucun client ne les lit ni ne les modifie. On les change
--- depuis l'éditeur SQL de Supabase.
+-- depuis l'éditeur SQL de Supabase. Deux barrières : aucun droit pour les clients, même si la base en donne
+-- par défaut aux nouvelles tables, et la RLS sans aucune politique.
 alter table public.usage_actions enable row level security;
 alter table public.usage_policies enable row level security;
+
+revoke all on table public.usage_actions, public.usage_policies from anon, authenticated;
 
 grant select on table public.usage_actions to service_role;
 grant select on table public.usage_policies to service_role;
