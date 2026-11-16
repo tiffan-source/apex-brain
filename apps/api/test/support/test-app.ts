@@ -38,6 +38,13 @@ export const TEST_ENVIRONMENT = {
 @Module({})
 class InMemoryAdaptersModule {}
 
+export type TestAppOptions = {
+  /** Des modules propres à un test (des routes qui n'existent que pour lui). */
+  modules?: Type[];
+  /** Un autre fournisseur d'IA que l'IA scriptée (`ai`) : l'adaptateur Claude sur un SDK simulé. */
+  aiProvider?: InteractiveAIProvider;
+};
+
 /**
  * L'application complète (modules, gardes, validation, filtre d'erreurs, configuration HTTP),
  * branchée sur des doublures en mémoire à la place de Supabase, Gemini et Firestore. `modules`
@@ -45,7 +52,7 @@ class InMemoryAdaptersModule {}
  */
 export async function createTestApp(
   environmentOverrides: Record<string, string> = {},
-  options: { modules?: Type[] } = {},
+  options: TestAppOptions = {},
 ) {
   const objectives = createInMemoryObjectiveInfrastructure();
   const chat = createInMemoryChatInfrastructure();
@@ -71,7 +78,7 @@ export async function createTestApp(
       { provide: AuthProvider, useValue: auth },
       { provide: GetConversationsQuery, useValue: chat.getConversationsQuery },
       { provide: AddMessageCommand, useValue: chat.addMessageCommand },
-      { provide: InteractiveAIProvider, useValue: ai },
+      { provide: InteractiveAIProvider, useValue: options.aiProvider ?? ai },
       { provide: IWorkflowStateRepository, useValue: workflowStates },
     ],
     exports: [...PORTS],

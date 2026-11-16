@@ -3,7 +3,7 @@
 Apex Brain est le serveur unique d'Apex : une application NestJS qui expose en API REST les
 capacités métier d'Apex (cas d'usage, queries, assistant IA) au client web Angular et au futur
 client mobile React Native. Un seul dépôt, un seul cerveau : la logique métier, la résolution des
-dépendances (Supabase, Gemini, Firebase) et l'orchestrateur XState vivent ici.
+dépendances (Supabase, Gemini ou Claude, Firebase) et l'orchestrateur XState vivent ici.
 
 Ce document décrit ce qui a été repris d'Apex, ce qui a été amélioré ou corrigé en chemin, et ce
 qui reste à faire. Les décisions structurantes sont détaillées dans [`docs/adr/`](./adr).
@@ -32,7 +32,8 @@ apex-brain/
 ├── libs/ai/                  Capacité générique de génération IA (port)
 ├── libs/supabase/            Adaptateurs Supabase (données + auth)
 ├── libs/gemini/              Adaptateur Gemini (SDK @google/genai)
-├── libs/firebase/            Adaptateur Firestore (état des workflows)
+├── libs/claude/              Adaptateur Claude (SDK @anthropic-ai/sdk)
+├── libs/firebase/            Adaptateur Firestore (état des workflows, historique de Claude)
 ├── workflows/ai-assistant/   Orchestrateur XState « envoyer un message à l'IA »
 └── supabase/                 Schéma de la base (migrations), désormais source de vérité
 ```
@@ -186,6 +187,9 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - [x] `libs/supabase` : client de données (clé secrète), clients d'auth éphémères, filtres de
       propriété, tri, corrections de mapping.
 - [x] `libs/gemini` : SDK direct, traduction des erreurs.
+- [x] `libs/claude` : SDK Anthropic direct (API Messages), historique des interactions gardé côté
+      serveur (Firestore ou mémoire), cache de prompt, traduction des erreurs ; choix du fournisseur
+      par `AI_PROVIDER` ([ADR 0009](./adr/0009-fournisseur-claude.md)).
 - [x] `libs/firebase` : `firebase-admin`, contexte et snapshot en JSON, anciens documents lisibles.
 - [x] `supabase/` : migrations reprises d'Apex (sans l'edge function), plus les `GRANT` explicites.
 
@@ -247,7 +251,12 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
   réponses et des refus. En production, les premiers appels (29 octobre 2026) ont été refusés en
   `401` : Gemini n'accepte pas la clé `GEMINI_API_KEY` configurée sur Render. Une panne de Gemini
   est désormais journalisée avec son statut HTTP, le code et le message de Gemini (ou
-  « empty response body ») et, pour un refus de la clé, la variable à vérifier.
+  « empty response body ») et, pour un refus de la clé, la variable à vérifier. L'appel réel à
+  Claude n'est pas vérifié non plus : son SDK l'est face à un faux serveur HTTP (`POST /v1/messages`,
+  clé dans `Authorization`, version de l'API, lecture des réponses et des refus).
+- **Historique des échanges avec Claude** (`ai-interaction-histories`, ADR 0009) : rien ne le
+  supprime, pas même la suppression de l'objectif. Expiration (TTL Firestore) et effacement avec
+  l'objectif à prévoir.
 - **Interactions conservées par Gemini** : 1 jour sur le palier gratuit, 55 jours sur le palier
   payant. Une conversation reprise après ce délai envoie un `previous_interaction_id` expiré ;
   le comportement de Gemini dans ce cas (et la reprise à prévoir) reste à vérifier.

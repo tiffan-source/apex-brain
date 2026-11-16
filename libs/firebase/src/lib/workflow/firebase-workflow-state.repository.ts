@@ -4,6 +4,7 @@ import type {
   WorkflowState,
   WorkflowStateValue,
 } from '@org/ai-assistant';
+import type { DocumentStore } from '../document-store';
 
 const COLLECTION = 'workflow-states';
 
@@ -24,17 +25,6 @@ type LegacyWorkflowStateDocument = {
   value: WorkflowStateValue;
   context: WorkflowContext;
 };
-
-/** Le strict nécessaire de Firestore, remplaçable dans les tests. */
-export interface DocumentStore {
-  collection(name: string): {
-    doc(id: string): {
-      set(data: Record<string, unknown>): Promise<unknown>;
-      get(): Promise<{ exists: boolean; data(): Record<string, unknown> | undefined }>;
-      delete(): Promise<unknown>;
-    };
-  };
-}
 
 export class FirebaseWorkflowStateRepository implements IWorkflowStateRepository {
   constructor(private readonly firebase: { db: DocumentStore }) {}

@@ -67,7 +67,7 @@ Applications
 There are currently three software systems:
 
 -   `apex-brain` (this repository): the server. It holds the core business logic (`libs/*`,
-    `workflows/*`), resolves its dependencies (Supabase, Gemini, Firebase) and exposes the
+    `workflows/*`), resolves its dependencies (Supabase, Gemini or Claude, Firebase) and exposes the
     capabilities over a REST API (`apps/api`).
 -   `apex-client` (repository `apex`): the web application used by the person.
 -   the mobile application (React Native, Expo).
