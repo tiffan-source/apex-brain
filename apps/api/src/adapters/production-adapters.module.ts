@@ -19,6 +19,7 @@ import {
   SupabaseTaskRepository,
 } from '@org/supabase';
 import type { Environment } from '../config/environment';
+import { BackgroundWork, WaitUntilBackgroundWork } from '../platform/background-work';
 import { PORTS } from './ports';
 
 @Module({})
@@ -77,6 +78,7 @@ export class ProductionAdaptersModule {
                   }),
                 ),
         },
+        { provide: BackgroundWork, useFactory: () => new WaitUntilBackgroundWork() },
       ],
       exports: [...PORTS],
     };

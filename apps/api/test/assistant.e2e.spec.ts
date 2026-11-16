@@ -160,6 +160,37 @@ describe('Conversation et assistant (e2e)', () => {
     ]);
   });
 
+  it("confie à l'hébergeur chaque tour lancé, jusqu'à son terme (waitUntil sur Vercel)", async () => {
+    t.ai.willRespond(
+      t.ai.toolCalls({
+        id: 'call-1',
+        name: 'createTask',
+        arguments: { objectiveId, title: 'Courir 5 km', importance: 4, urgency: 2 },
+      }),
+      t.ai.text("C'est ajouté."),
+    );
+
+    expect((await send('Ajoute un pas')).status).toBe(202);
+    expect(t.background.work).toHaveLength(1);
+    // Le tour s'arrête de lui-même sur la demande d'accord : l'instance peut alors être libérée.
+    await t.background.work[0];
+    await expect(state()).resolves.toMatchObject({ status: 'awaiting-permission' });
+    expect(t.background.work).toHaveLength(1);
+
+    await t
+      .http()
+      .post(`/v2/objectives/${objectiveId}/assistant/permission`)
+      .set('Authorization', alice.authorization)
+      .send({ granted: true, toolCallId: 'call-1' });
+    expect(t.background.work).toHaveLength(2);
+    await t.background.work[1];
+
+    await expect(state()).resolves.toMatchObject({
+      status: 'ready',
+      lastRegisteredMessage: { content: "C'est ajouté." },
+    });
+  });
+
   it("signale la panne d'Akari dans l'état, et accepte un nouveau message", async () => {
     const logged = vi.spyOn(Logger.prototype, 'error');
     t.ai.willRespond(new AIProviderError('quota'), t.ai.text('Me revoilà.'));

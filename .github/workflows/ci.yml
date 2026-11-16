@@ -24,6 +24,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx nx run-many -t lint typecheck vite:test build --output-style=static
+      # La fonction Vercel telle qu'elle sera déployée : traçage complet, démarrage, routes (ADR 0009).
+      - name: Fonction Vercel
+        run: |
+          npx nx run api:vercel-build --output-style=static
+          node tools/vercel/smoke-test.mjs
 
   integration:
     name: Intégration contre Supabase

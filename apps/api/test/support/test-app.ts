@@ -20,6 +20,16 @@ import { AppModule } from '../../src/app.module';
 import type { Environment } from '../../src/config/environment';
 import { loadEnvironment } from '../../src/config/environment';
 import { configureApp } from '../../src/configure-app';
+import { BackgroundWork } from '../../src/platform/background-work';
+
+/** Retient le travail que l'application confie à l'hébergeur après une réponse (`waitUntil` sur Vercel). */
+export class RecordedBackgroundWork extends BackgroundWork {
+  readonly work: Promise<unknown>[] = [];
+
+  keepAliveUntil(work: Promise<unknown>): void {
+    this.work.push(work);
+  }
+}
 
 export const TEST_ENVIRONMENT = {
   NODE_ENV: 'test',
@@ -52,6 +62,7 @@ export async function createTestApp(
   const auth = new InMemoryAuthProvider();
   const ai = new ScriptedAIProvider();
   const workflowStates = new InMemoryWorkflowStateRepository();
+  const background = new RecordedBackgroundWork();
 
   // Comme le trigger de la base : chaque objectif principal reçoit sa conversation.
   objectives.db.onObjectiveCreated((row) => {
@@ -73,6 +84,7 @@ export async function createTestApp(
       { provide: AddMessageCommand, useValue: chat.addMessageCommand },
       { provide: InteractiveAIProvider, useValue: ai },
       { provide: IWorkflowStateRepository, useValue: workflowStates },
+      { provide: BackgroundWork, useValue: background },
     ],
     exports: [...PORTS],
   };
@@ -94,7 +106,18 @@ export async function createTestApp(
     return { id, accessToken, authorization: `Bearer ${accessToken}` };
   };
 
-  return { app, http, signIn, objectives, chat, auth, ai, workflowStates, close: () => app.close() };
+  return {
+    app,
+    http,
+    signIn,
+    objectives,
+    chat,
+    auth,
+    ai,
+    workflowStates,
+    background,
+    close: () => app.close(),
+  };
 }
 
 export type TestApp = Awaited<ReturnType<typeof createTestApp>>;

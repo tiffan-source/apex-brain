@@ -7,6 +7,9 @@ coverage
 # Dépendances
 node_modules
 
+# Vercel (projet lié par la CLI, sortie de `npx nx run api:vercel-build`)
+.vercel
+
 # Nx
 .nx/cache
 .nx/workspace-data

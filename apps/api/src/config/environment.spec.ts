@@ -19,7 +19,21 @@ describe('loadEnvironment', () => {
       GEMINI_MODEL: 'gemini-3.8-flash',
       WORKFLOW_STATE_STORE: 'firestore',
       ASSISTANT_IDLE_TIMEOUT_MINUTES: 30,
+      ASSISTANT_TURN_OWNERSHIP_SECONDS: 0,
     });
+  });
+
+  it("refuse plusieurs instances qui ne partageraient pas l'état des workflows", () => {
+    expect(loadEnvironment({ ...minimal, ASSISTANT_TURN_OWNERSHIP_SECONDS: '330' })).toMatchObject({
+      ASSISTANT_TURN_OWNERSHIP_SECONDS: 330,
+    });
+    expect(() =>
+      loadEnvironment({
+        ...minimal,
+        ASSISTANT_TURN_OWNERSHIP_SECONDS: '330',
+        WORKFLOW_STATE_STORE: 'memory',
+      }),
+    ).toThrow(/WORKFLOW_STATE_STORE/);
   });
 
   it('lit les listes, les booléens et les nombres', () => {

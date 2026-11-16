@@ -15,6 +15,14 @@
         "command": "vite build"
       }
     },
+    "vercel-build": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "cache": false,
+      "options": {
+        "command": "node tools/vercel/build-output.mjs"
+      }
+    },
     "serve": {
       "executor": "nx:run-commands",
       "dependsOn": ["build"],

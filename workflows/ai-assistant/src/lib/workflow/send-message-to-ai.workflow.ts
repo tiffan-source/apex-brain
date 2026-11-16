@@ -1,6 +1,6 @@
 import { ConversationNotFoundError } from '@org/chat';
 import { Result, runWithResult } from '@org/chore';
-import { Actor, createActor, InspectionEvent, Observer, Snapshot, Subscription } from 'xstate';
+import { Actor, createActor, InspectionEvent, Observer, Snapshot, Subscription, waitFor } from 'xstate';
 import { NoPendingPermissionError } from '../errors/no-pending-permission.error';
 import { WorkflowBusyError } from '../errors/workflow-busy.error';
 import {
@@ -31,6 +31,24 @@ export interface WorkflowLogger {
 export type SendMessageToAIWorkflowOptions = {
   /** Après ce délai sans activité, un workflow au repos quitte la mémoire (il reste persisté). Défaut : 30 min. */
   idleTimeoutMs?: number;
+  /**
+   * Plusieurs instances servent les mêmes workflows (fonctions Vercel, ADR 0009) : la durée pendant
+   * laquelle un tour en cours appartient à l'instance qui le mène, comptée depuis sa dernière
+   * sauvegarde. Les autres instances le lisent sans le reprendre et refusent d'en lancer un autre ;
+   * au-delà, il est abandonné (son instance a disparu) et la première qui le lit le reprend. Elle
+   * doit couvrir la durée maximale d'une invocation.
+   *
+   * Absent ou 0 : un seul processus sert tous les workflows, la mémoire fait foi (comportement
+   * d'origine, ADR 0004).
+   */
+  turnOwnershipMs?: number;
+  /**
+   * Prévenu de chaque tour que ce processus lance ou reprend, avec la promesse de sa fin : au repos
+   * ou en attente d'un accord, sauvegardes faites. Le tour continue après la réponse HTTP ; un
+   * hébergeur qui fige le processus dès la réponse envoyée (fonction Vercel) doit le savoir pour le
+   * garder en vie jusque-là. La promesse ne rejette jamais.
+   */
+  keepAlive?: (turn: Promise<void>) => void;
   /** Observateur d'inspection XState (désactivé par défaut). */
   inspect?: Observer<InspectionEvent> | ((event: InspectionEvent) => void);
   logger?: WorkflowLogger;
@@ -45,6 +63,15 @@ type TrackedWorkflow = {
   subscription?: Subscription;
 };
 
+/**
+ * Où se trouve un workflow : un acteur dans ce processus, ou seulement son état persisté (un tour
+ * mené par une autre instance, ou un workflow au repos qu'une lecture n'a pas besoin de démarrer).
+ */
+type Located = { tracked: TrackedWorkflow } | { persisted: WorkflowState };
+
+/** Ce qu'on veut faire du workflow : le lire, agir sur lui s'il existe, ou le démarrer au besoin. */
+type Purpose = 'read' | 'act' | 'start';
+
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 const consoleLogger: WorkflowLogger = {
@@ -58,6 +85,9 @@ const consoleLogger: WorkflowLogger = {
  * Chaque méthode vérifie d'abord que la conversation de l'objectif appartient à la personne, puis
  * reprend l'acteur en mémoire, le restaure depuis son état persisté, ou le crée. Chaque transition
  * est persistée ; restaurer un snapshot relance l'étape qui était en cours.
+ *
+ * Avec `turnOwnershipMs`, plusieurs instances se partagent les workflows : l'état persisté fait foi,
+ * une instance ne se fie à sa mémoire que pour le tour qu'elle mène (ADR 0009).
  */
 export class SendMessageToAIWorkflow {
   private readonly machine: ConversationMachine;
@@ -65,6 +95,7 @@ export class SendMessageToAIWorkflow {
   private readonly locks = new Map<string, Promise<void>>();
   private readonly logger: WorkflowLogger;
   private readonly idleTimeoutMs: number;
+  private readonly turnOwnershipMs: number;
 
   constructor(
     private readonly deps: SendMessageToAIWorkflowDependencies,
@@ -73,18 +104,20 @@ export class SendMessageToAIWorkflow {
     this.machine = getMachine(deps);
     this.logger = options.logger ?? consoleLogger;
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    this.turnOwnershipMs = options.turnOwnershipMs ?? 0;
   }
 
   /**
    * L'état du workflow de cet objectif. Un workflow persisté est remis en mémoire (et son tour
-   * interrompu reprend) ; un workflow qui n'a jamais servi est décrit sans être créé.
+   * interrompu reprend) ; un workflow qui n'a jamais servi est décrit sans être créé. Sur plusieurs
+   * instances, un workflow au repos ou un tour mené ailleurs est décrit d'après son état persisté.
    */
   getState(objectiveId: string, ownerId: string): Promise<Result<WorkflowStateView>> {
     return runWithResult(
       async () => {
         await this.authorize(objectiveId, ownerId);
-        const tracked = await this.obtain(objectiveId, ownerId, false);
-        return tracked ? this.view(objectiveId, tracked) : initialWorkflowStateView(objectiveId);
+        const located = await this.locate(objectiveId, ownerId, 'read');
+        return located ? this.viewOf(objectiveId, located) : initialWorkflowStateView(objectiveId);
       },
       [ConversationNotFoundError],
       'Failed to read the workflow state',
@@ -96,25 +129,32 @@ export class SendMessageToAIWorkflow {
     return runWithResult(
       async () => {
         await this.authorize(objectiveId, ownerId);
-        return this.view(objectiveId, await this.require(objectiveId, ownerId));
+        return this.viewOf(objectiveId, await this.locateOrStart(objectiveId, ownerId));
       },
       [ConversationNotFoundError],
       'Failed to start the workflow',
     );
   }
 
-  /** Envoyer un message : refusé (`WORKFLOW_BUSY`) tant qu'un tour est en cours. */
+  /**
+   * Envoyer un message : refusé (`WORKFLOW_BUSY`) tant qu'un tour est en cours, ici ou dans une
+   * autre instance.
+   */
   sendMessage(objectiveId: string, ownerId: string, message: string): Promise<Result<WorkflowStateView>> {
     return runWithResult(
       async () => {
         await this.authorize(objectiveId, ownerId);
-        const tracked = await this.require(objectiveId, ownerId);
+        const located = await this.locateOrStart(objectiveId, ownerId);
+
+        if (!('tracked' in located)) throw new WorkflowBusyError(objectiveId);
+        const { tracked } = located;
 
         if (tracked.actor.getSnapshot().value !== WORKFLOW_READY_FOR_NEW_MESSAGE) {
           throw new WorkflowBusyError(objectiveId);
         }
 
         tracked.actor.send({ type: 'message.send', userId: ownerId, objectiveId, prompt: message });
+        this.keepAliveUntilSettled(tracked);
         return this.view(objectiveId, tracked);
       },
       [ConversationNotFoundError, WorkflowBusyError],
@@ -139,7 +179,8 @@ export class SendMessageToAIWorkflow {
     return runWithResult(
       async () => {
         await this.authorize(objectiveId, ownerId);
-        const tracked = await this.obtain(objectiveId, ownerId, false);
+        const located = await this.locate(objectiveId, ownerId, 'act');
+        const tracked = located && 'tracked' in located ? located.tracked : undefined;
         const snapshot = tracked?.actor.getSnapshot();
 
         if (
@@ -152,6 +193,7 @@ export class SendMessageToAIWorkflow {
         }
 
         tracked.actor.send({ type: 'user.response', permission });
+        this.keepAliveUntilSettled(tracked);
         return this.view(objectiveId, tracked);
       },
       [ConversationNotFoundError, NoPendingPermissionError],
@@ -236,36 +278,71 @@ export class SendMessageToAIWorkflow {
     }
   }
 
-  private async require(objectiveId: string, ownerId: string): Promise<TrackedWorkflow> {
-    return (await this.obtain(objectiveId, ownerId, true)) as TrackedWorkflow;
+  /** Plusieurs instances se partagent-elles les workflows (`turnOwnershipMs`) ? */
+  private get sharedAcrossInstances(): boolean {
+    return this.turnOwnershipMs > 0;
   }
 
-  /** L'acteur en mémoire, sinon restauré, sinon (si `create`) un nouvel acteur. */
-  private obtain(objectiveId: string, ownerId: string, create: boolean): Promise<TrackedWorkflow | null> {
+  private async locateOrStart(objectiveId: string, ownerId: string): Promise<Located> {
+    return (await this.locate(objectiveId, ownerId, 'start')) as Located;
+  }
+
+  /**
+   * L'acteur en mémoire, sinon restauré depuis l'état persisté, sinon (pour `start`) un nouvel acteur.
+   *
+   * Sur plusieurs instances, la mémoire ne fait foi que pour un tour que ce processus mène : un
+   * acteur au repos a pu être devancé par une autre instance (un accord donné ailleurs, un nouveau
+   * message), il est relu depuis l'état persisté. Un tour en cours qui appartient à une autre
+   * instance n'est jamais repris ici : il est seulement décrit.
+   */
+  private locate(objectiveId: string, ownerId: string, purpose: Purpose): Promise<Located | null> {
     return this.withLock(objectiveId, async () => {
       const tracked = this.workflows.get(objectiveId);
 
-      if (tracked && tracked.actor.getSnapshot().status === 'active') {
+      if (
+        tracked &&
+        tracked.actor.getSnapshot().status === 'active' &&
+        !(this.sharedAcrossInstances && isRestingValue(this.valueOf(tracked)))
+      ) {
         tracked.lastActivity = Date.now();
-        return tracked;
+        return { tracked };
       }
 
       if (tracked) {
-        // Acteur arrêté par une erreur inattendue : on repart de son dernier état persisté.
+        // Acteur arrêté par une erreur inattendue, ou au repos et peut-être périmé : on repart de
+        // son dernier état persisté (ses propres sauvegardes sont attendues avant de le relire).
         await this.release(objectiveId, tracked);
       }
 
       const state = await this.deps.workflowStateRepository.findById(objectiveId);
 
-      if (state) {
-        if (state.context?.userId && state.context.userId !== ownerId) {
-          throw new ConversationNotFoundError(objectiveId);
-        }
-        return this.startRestored(objectiveId, ownerId, state);
+      if (!state) {
+        return purpose === 'start'
+          ? { tracked: this.track(objectiveId, ownerId, createActor(this.machine, this.actorOptions())) }
+          : null;
       }
 
-      return create ? this.track(objectiveId, ownerId, createActor(this.machine, this.actorOptions())) : null;
+      if (state.context?.userId && state.context.userId !== ownerId) {
+        throw new ConversationNotFoundError(objectiveId);
+      }
+
+      if (this.sharedAcrossInstances) {
+        if (this.isOwnedByAnotherInstance(state)) return { persisted: state };
+        // Au repos, une lecture n'a pas besoin d'acteur : il ne serait qu'une copie de plus à tenir à jour.
+        if (purpose === 'read' && isRestingValue(state.value)) return { persisted: state };
+      }
+
+      return { tracked: this.startRestored(objectiveId, ownerId, state) };
     });
+  }
+
+  /**
+   * Un tour en cours, sauvegardé il y a moins de `turnOwnershipMs` : l'instance qui le mène est
+   * vivante. Plus vieux (ou sans date, document d'Apex), il est abandonné et peut être repris.
+   */
+  private isOwnedByAnotherInstance(state: WorkflowState): boolean {
+    if (isRestingValue(state.value) || !state.updatedAt) return false;
+    return this.now().getTime() - Date.parse(state.updatedAt) < this.turnOwnershipMs;
   }
 
   private startRestored(objectiveId: string, ownerId: string, state: WorkflowState): TrackedWorkflow {
@@ -273,11 +350,14 @@ export class SendMessageToAIWorkflow {
 
     if (persisted && persisted.status === 'active') {
       try {
-        return this.track(
+        const tracked = this.track(
           objectiveId,
           ownerId,
           createActor(this.machine, { ...this.actorOptions(), snapshot: persisted as never }),
         );
+        // Restaurer un tour interrompu relance son étape : ce processus le mène désormais.
+        if (!isRestingValue(this.valueOf(tracked))) this.keepAliveUntilSettled(tracked);
+        return tracked;
       } catch (error) {
         this.logger.error(`Workflow ${objectiveId}: the persisted snapshot could not be restored`, error);
       }
@@ -354,7 +434,7 @@ export class SendMessageToAIWorkflow {
         value: snapshot.value,
         context: snapshot.context,
         persistedSnapshot: tracked.actor.getPersistedSnapshot(),
-        updatedAt: new Date().toISOString(),
+        updatedAt: this.now().toISOString(),
       }),
     );
 
@@ -378,8 +458,52 @@ export class SendMessageToAIWorkflow {
         value: snapshot.value as WorkflowStateValue,
         context: snapshot.context,
       },
-      this.deps.now?.() ?? new Date(),
+      this.now(),
     );
+  }
+
+  private viewOf(objectiveId: string, located: Located): WorkflowStateView {
+    if ('tracked' in located) return this.view(objectiveId, located.tracked);
+
+    const { value, context } = located.persisted;
+    return toWorkflowStateView(
+      objectiveId,
+      { value, context: { ...initialWorkflowContext(), ...context } },
+      this.now(),
+    );
+  }
+
+  private valueOf(tracked: TrackedWorkflow): WorkflowStateValue {
+    return tracked.actor.getSnapshot().value as WorkflowStateValue;
+  }
+
+  private now(): Date {
+    return this.deps.now?.() ?? new Date();
+  }
+
+  /** Prévenir l'hébergeur (`keepAlive`) qu'un tour tourne ici jusqu'à son terme. */
+  private keepAliveUntilSettled(tracked: TrackedWorkflow): void {
+    this.options.keepAlive?.(this.untilSettled(tracked));
+  }
+
+  /**
+   * Le terme du tour en cours : au repos ou en attente d'un accord (ou acteur arrêté), et toutes
+   * ses sauvegardes faites. Ne rejette jamais.
+   */
+  private async untilSettled(tracked: TrackedWorkflow): Promise<void> {
+    const settled = (snapshot: ReturnType<Actor<ConversationMachine>['getSnapshot']>) =>
+      snapshot.status !== 'active' || isRestingValue(snapshot.value as WorkflowStateValue);
+
+    // Un acteur arrêté (objectif supprimé, arrêt du serveur) fait rejeter `waitFor` : le tour est
+    // terminé quand même.
+    await waitFor(tracked.actor, settled).catch(() => undefined);
+
+    // Une sauvegarde peut en suivre une autre : on attend la dernière.
+    let persisting: Promise<void>;
+    do {
+      persisting = tracked.persisting;
+      await persisting;
+    } while (persisting !== tracked.persisting);
   }
 
   private actorOptions() {

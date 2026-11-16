@@ -39,6 +39,9 @@ export const environmentSchema = z
     FIREBASE_DATABASE_ID: z.string().optional(),
 
     ASSISTANT_IDLE_TIMEOUT_MINUTES: z.coerce.number().positive().default(30),
+    // Plusieurs instances (fonctions Vercel) : un tour en cours appartient à l'instance qui le mène
+    // pendant ce délai après sa dernière sauvegarde (ADR 0009). 0 : un seul processus.
+    ASSISTANT_TURN_OWNERSHIP_SECONDS: z.coerce.number().int().min(0).default(0),
 
     THROTTLE_DEFAULT_LIMIT: z.coerce.number().int().positive().default(300),
     THROTTLE_AUTH_LIMIT: z.coerce.number().int().positive().default(10),
@@ -50,6 +53,13 @@ export const environmentSchema = z
         code: 'custom',
         path: ['FIREBASE_PROJECT_ID'],
         message: 'requis quand WORKFLOW_STATE_STORE=firestore',
+      });
+    }
+    if (environment.ASSISTANT_TURN_OWNERSHIP_SECONDS > 0 && environment.WORKFLOW_STATE_STORE === 'memory') {
+      context.addIssue({
+        code: 'custom',
+        path: ['WORKFLOW_STATE_STORE'],
+        message: 'plusieurs instances (ASSISTANT_TURN_OWNERSHIP_SECONDS) doivent partager l’état : firestore',
       });
     }
   });

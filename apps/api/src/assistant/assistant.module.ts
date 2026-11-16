@@ -20,6 +20,7 @@ import { IdGenerator } from '@org/chore';
 import { ObjectiveInternalService, ObjectiveRepository } from '@org/objective';
 import type { Environment } from '../config/environment';
 import { APP_ENVIRONMENT } from '../config/environment';
+import { BackgroundWork } from '../platform/background-work';
 import { AssistantController } from './assistant.controller';
 
 /** Toutes les minutes, les workflows au repos depuis trop longtemps quittent la mémoire. */
@@ -57,6 +58,7 @@ const EVICTION_INTERVAL_MS = 60_000;
         systemContext: SystemContextProvider,
         ids: IdGenerator,
         states: IWorkflowStateRepository,
+        background: BackgroundWork,
       ) => {
         const logger = new Logger('Assistant');
         return new SendMessageToAIWorkflow(
@@ -72,6 +74,10 @@ const EVICTION_INTERVAL_MS = 60_000;
           },
           {
             idleTimeoutMs: environment.ASSISTANT_IDLE_TIMEOUT_MINUTES * 60_000,
+            // Plusieurs instances (fonctions Vercel) : voir ADR 0009.
+            turnOwnershipMs: environment.ASSISTANT_TURN_OWNERSHIP_SECONDS * 1000,
+            // Le tour continue après la réponse 202 : l'hébergeur garde l'instance en vie jusqu'au bout.
+            keepAlive: (turn) => background.keepAliveUntil(turn),
             logger: {
               // Une panne de tour arrive sans objet d'erreur (tout est dans le message) : lui passer
               // `String(undefined)` faisait imprimer une ligne « undefined » à Nest après chaque panne.
@@ -93,6 +99,7 @@ const EVICTION_INTERVAL_MS = 60_000;
         SystemContextProvider,
         IdGenerator,
         IWorkflowStateRepository,
+        BackgroundWork,
       ],
     },
   ],

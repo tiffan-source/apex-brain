@@ -1,21 +1,9 @@
-import 'reflect-metadata';
-import { ConsoleLogger, Logger } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
-import { ProductionAdaptersModule } from './adapters/production-adapters.module';
-import { AppModule } from './app.module';
+import { Logger } from '@nestjs/common';
 import { loadEnvironment } from './config/environment';
-import { configureApp } from './configure-app';
+import { createApp } from './create-app';
 
 const environment = loadEnvironment();
-
-const app = await NestFactory.create(
-  AppModule.register({ environment, adapters: ProductionAdaptersModule.register(environment) }),
-  {
-    logger: new ConsoleLogger({ prefix: 'ApexBrain', json: environment.LOG_FORMAT === 'json' }),
-  },
-);
-
-configureApp(app, environment);
+const app = await createApp(environment);
 
 await app.listen(environment.PORT, environment.HOST);
 
