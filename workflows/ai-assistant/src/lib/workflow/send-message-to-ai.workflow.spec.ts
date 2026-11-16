@@ -876,4 +876,206 @@ describe('SendMessageToAIWorkflow', () => {
       expect(silentLogger.errors).toEqual([failure]);
     });
   });
+
+  describe("le tour continue après la réponse (l'hébergeur est prévenu)", () => {
+    const addTask = {
+      id: 'call-1',
+      name: 'createTask',
+      arguments: { objectiveId: 'o1', title: 'Courir 5 km', importance: 4, urgency: 2 },
+    };
+
+    it("reçoit chaque tour lancé, jusqu'au repos ou à l'attente d'un accord, sauvegardes faites", async () => {
+      const turns: Promise<void>[] = [];
+      const harness = createWorkflowHarness({ keepAlive: (turn) => turns.push(turn) });
+      const { workflow, ai, workflowStateRepository } = harness;
+      ai.willRespond(ai.toolCalls(addTask), ai.text('Ajouté.'));
+
+      await workflow.sendMessage('o1', 'alice', 'Ajoute un pas');
+      expect(turns).toHaveLength(1);
+      await turns[0];
+      await expect(workflowStateRepository.findById('o1')).resolves.toMatchObject({
+        value: WORKFLOW_AWAITING_PERMISSION,
+      });
+
+      // Une lecture ne lance rien.
+      await workflow.getState('o1', 'alice');
+      expect(turns).toHaveLength(1);
+
+      await workflow.respondToPermission('o1', 'alice', true);
+      expect(turns).toHaveLength(2);
+      await turns[1];
+      await expect(workflowStateRepository.findById('o1')).resolves.toMatchObject({
+        value: WORKFLOW_READY_FOR_NEW_MESSAGE,
+        context: { lastRegisteredMessage: { content: 'Ajouté.' } },
+      });
+    });
+
+    it('reçoit aussi le tour interrompu que restaure un redémarrage', async () => {
+      const turns: Promise<void>[] = [];
+      const harness = createWorkflowHarness();
+      const { workflow, ai, workflowStateRepository } = harness;
+      ai.willRespond(() => new Promise(() => undefined), ai.text('Après la reprise.'));
+
+      await workflow.sendMessage('o1', 'alice', 'Question');
+      await vi.waitFor(() => expect(ai.calls).toHaveLength(1));
+      await workflow.shutdown();
+
+      const restarted = harness.restart({ keepAlive: (turn) => turns.push(turn) });
+      await restarted.getState('o1', 'alice');
+      expect(turns).toHaveLength(1);
+      await turns[0];
+
+      await expect(workflowStateRepository.findById('o1')).resolves.toMatchObject({
+        value: WORKFLOW_READY_FOR_NEW_MESSAGE,
+        context: { lastRegisteredMessage: { content: 'Après la reprise.' } },
+      });
+    });
+
+    it("libère l'hébergeur quand le tour est arrêté (objectif supprimé)", async () => {
+      const turns: Promise<void>[] = [];
+      const { workflow, ai, chat } = createWorkflowHarness({ keepAlive: (turn) => turns.push(turn) });
+      ai.willRespond(() => new Promise(() => undefined));
+
+      await workflow.sendMessage('o1', 'alice', 'Question');
+      await vi.waitFor(() => expect(ai.calls).toHaveLength(1));
+      chat.db.deleteConversation('o1');
+      await workflow.forget('o1');
+
+      await expect(turns[0]).resolves.toBeUndefined();
+    });
+  });
+
+  describe('plusieurs instances (fonctions Vercel)', () => {
+    const OWNERSHIP_MS = 60_000;
+    const addTask = {
+      id: 'call-1',
+      name: 'createTask',
+      arguments: { objectiveId: 'o1', title: 'Courir 5 km', importance: 4, urgency: 2 },
+    };
+
+    /** Deux instances sur le même stockage, comme deux fonctions Vercel, et les tours qu'elles lancent. */
+    const twoInstances = () => {
+      const turns: Promise<void>[] = [];
+      const harness = createWorkflowHarness({
+        turnOwnershipMs: OWNERSHIP_MS,
+        keepAlive: (turn) => turns.push(turn),
+      });
+      return { ...harness, a: harness.workflow, b: harness.restart(), turns };
+    };
+
+    it("décrit le tour qu'une autre instance mène sans le relancer, et refuse d'en lancer un autre", async () => {
+      const harness = twoInstances();
+      const { a, b, ai } = harness;
+      let answer: (response: AIInteractionResponse) => void = () => undefined;
+      ai.willRespond(() => new Promise((resolve) => (answer = resolve)));
+
+      await a.sendMessage('o1', 'alice', 'Question');
+      await vi.waitFor(async () =>
+        expect(await b.getState('o1', 'alice')).toMatchObject({
+          success: true,
+          data: { status: 'processing', activity: { step: 'thinking' } },
+        }),
+      );
+
+      expect(b.activeWorkflowCount).toBe(0);
+      await expect(b.sendMessage('o1', 'alice', 'Encore ?')).resolves.toMatchObject({
+        success: false,
+        error: { code: 'WORKFLOW_BUSY' },
+      });
+
+      answer(ai.text('Réponse.'));
+      await expect(waitForStatus(b, 'ready')).resolves.toMatchObject({
+        lastRegisteredMessage: { content: 'Réponse.' },
+      });
+      expect(ai.calls).toHaveLength(1);
+      expect(messagesOf(harness)).toEqual([
+        { sender: 'alice', content: 'Question' },
+        { sender: AI_SENDER_ID, content: 'Réponse.' },
+      ]);
+    });
+
+    it('reprend une seule fois le tour abandonné par une instance disparue, passé le délai', async () => {
+      const harness = twoInstances();
+      const { a, b, ai, deps } = harness;
+      let time = Date.parse('2026-11-16T20:00:00.000Z');
+      deps.now = () => new Date(time);
+      // L'instance A disparaît pendant l'appel à l'IA : sa réponse ne viendra jamais.
+      ai.willRespond(() => new Promise(() => undefined), ai.text('Réponse après la reprise.'));
+
+      await a.sendMessage('o1', 'alice', 'Question');
+      await vi.waitFor(() => expect(ai.calls).toHaveLength(1));
+
+      time += OWNERSHIP_MS - 1_000;
+      await expect(b.getState('o1', 'alice')).resolves.toMatchObject({
+        success: true,
+        data: { status: 'processing' },
+      });
+      expect(ai.calls).toHaveLength(1);
+
+      time += 2_000;
+      await b.getState('o1', 'alice');
+      const done = await waitForStatus(b, 'ready');
+
+      expect(done.lastRegisteredMessage?.content).toBe('Réponse après la reprise.');
+      expect(ai.calls).toHaveLength(2);
+      expect(messagesOf(harness)).toEqual([
+        { sender: 'alice', content: 'Question' },
+        { sender: AI_SENDER_ID, content: 'Réponse après la reprise.' },
+      ]);
+    });
+
+    it('ne croit pas sa mémoire quand une autre instance a fait avancer le workflow (accord donné ailleurs)', async () => {
+      const { a, b, ai, objectives, turns } = twoInstances();
+      ai.willRespond(ai.toolCalls(addTask), ai.text('Ajouté.'));
+
+      await a.sendMessage('o1', 'alice', 'Ajoute un pas');
+      await turns[0];
+      // A garde en mémoire un acteur qui attend l'accord…
+      expect(a.activeWorkflowCount).toBe(1);
+
+      // … que la personne donne sur l'instance B.
+      await expect(b.respondToPermission('o1', 'alice', true)).resolves.toMatchObject({ success: true });
+      await turns[1];
+
+      await expect(a.getState('o1', 'alice')).resolves.toMatchObject({
+        success: true,
+        data: { status: 'ready', pendingToolCall: null, lastRegisteredMessage: { content: 'Ajouté.' } },
+      });
+      await expect(a.respondToPermission('o1', 'alice', true)).resolves.toMatchObject({
+        success: false,
+        error: { code: 'NO_PENDING_PERMISSION' },
+      });
+      expect([...objectives.db.tasks.values()].map((task) => task.title)).toEqual(['Courir 5 km']);
+    });
+
+    it("enchaîne les messages d'une instance à l'autre, sur l'interaction précédente", async () => {
+      const { a, b, ai, turns } = twoInstances();
+      ai.willRespond(ai.text('Première réponse.'), ai.text('Deuxième réponse.'));
+
+      await a.sendMessage('o1', 'alice', 'Un');
+      await turns[0];
+      await expect(b.sendMessage('o1', 'alice', 'Deux')).resolves.toMatchObject({ success: true });
+      await turns[1];
+
+      const second = ai.calls[1];
+      if (second.kind !== 'generateMessage') throw new Error('generateMessage attendu');
+      expect(second.input.previousInteractionId).toBe('interaction-1');
+      await expect(a.getState('o1', 'alice')).resolves.toMatchObject({
+        data: { status: 'ready', lastRegisteredMessage: { content: 'Deuxième réponse.' } },
+      });
+    });
+
+    it("lit un workflow au repos sans garder d'acteur en mémoire", async () => {
+      const { a, b, ai, turns } = twoInstances();
+      ai.willRespond(ai.text('Bonjour.'));
+      await a.sendMessage('o1', 'alice', 'Salut');
+      await turns[0];
+
+      await expect(b.getState('o1', 'alice')).resolves.toMatchObject({
+        success: true,
+        data: { status: 'ready', lastRegisteredMessage: { content: 'Bonjour.' } },
+      });
+      expect(b.activeWorkflowCount).toBe(0);
+    });
+  });
 });

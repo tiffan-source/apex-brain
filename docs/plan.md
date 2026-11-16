@@ -218,7 +218,15 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Client mobile** : générer un client typé depuis `/docs-json`.
 - **Base de données** : lancer Supabase depuis `apex-brain` et retirer `supabase/` d'Apex une
   fois le client migré ; verrouiller les règles Firestore (le navigateur n'y écrit plus).
-- **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE.
+- **Hébergement** ([ADR 0009](./adr/0009-hebergement-vercel.md)) : l'API quitte Render pour une
+  fonction Vercel (16 novembre 2026). La sortie de build est écrite par le dépôt
+  (`npx nx run api:vercel-build`) et vérifiée par la CI ; le tour d'Akari garde l'instance en vie
+  (`waitUntil`) ; sur plusieurs instances, Firestore fait foi et un tour appartient à l'instance
+  qui le mène. Reste à basculer : le web et le mobile vers l'URL Vercel, les origines CORS, puis
+  suspendre Render.
+- **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE. Sur Vercel, un
+  `POST …/messages` qui suit le tour jusqu'à son terme ferait aussi tomber `waitUntil` et la
+  lecture croisée entre instances (ADR 0009).
 - **Rôles** ([ADR 0008](./adr/0008-roles.md)) : `admin` et `premium`, lus dans
   `app_metadata.roles`, rendus par `/v2/auth/me`, vérifiés par `@Roles` et `RolesGuard`. Aucune
   route n'est encore réservée. Restent à décider : les routes à réserver, et comment premium
@@ -254,8 +262,9 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **État de l'assistant** : retirer `value` et `lastError.step` quand plus aucune version installée
   ne les lira. Les clients à jour lisent `activity` (`docs/adr/0005-activite-de-l-assistant.md`).
 - **Backlog d'Apex** encore ouvert : laisser filer (objectif, étape, pas), renommer les cas
-  d'usage selon le métier (`DefineObjective`…), plusieurs instances du serveur (les
-  acteurs XState vivent en mémoire d'un seul processus).
+  d'usage selon le métier (`DefineObjective`…). Plusieurs instances du serveur : traité par
+  l'ADR 0009, avec ses limites (deux messages simultanés sur deux instances, limitation de débit
+  par instance).
 
 ## 8. Questions ouvertes
 

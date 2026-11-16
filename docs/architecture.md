@@ -79,6 +79,10 @@ domaine, rien hors du dossier `bff/` ne les lit.
   [PRD](./features/send-message-to-ai-prd.md)).
 - **Racine de composition** : `apps/api/src/adapters/production-adapters.module.ts` (ports →
   adaptateurs) et `apps/api/src/<contexte>/<contexte>.module.ts` (cas d'usage ← ports).
+  `create-app.ts` assemble l'application ; deux points d'entrée la servent : `main.ts` (un port,
+  serveur Node) et `serverless.ts` (une fonction Vercel, [ADR 0009](./adr/0009-hebergement-vercel.md)).
+- **Hébergeur** : `apps/api/src/platform/` (`BackgroundWork` : garder l'instance en vie pendant
+  un tour d'Akari, `waitUntil` sur Vercel), et `tools/vercel/` (la sortie de build Vercel).
 - **Contrat HTTP** : `apps/api/src/<contexte>/*.schemas.ts` (zod) ; les mêmes schémas valident
   les requêtes, documentent l'API (OpenAPI) et vérifient les réponses dans les tests e2e.
 

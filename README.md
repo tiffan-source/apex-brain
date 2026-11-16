@@ -37,6 +37,7 @@ Tout passe par Nx (`npx nx …`), comme dans Apex.
 | Tous les tests, le lint, les types | `npx nx run-many -t vite:test lint typecheck` |
 | Seulement ce qui a changé | `npx nx affected -t vite:test lint typecheck` |
 | Intégration contre le Supabase local | `npx nx run api:test-integration` (variables de `supabase status -o env`) |
+| Fonction Vercel (`.vercel/output`), puis sa vérification | `npx nx run api:vercel-build` puis `node tools/vercel/smoke-test.mjs` |
 
 Projets : `api`, `chore`, `objective`, `user`, `auth`, `chat`, `ai`, `supabase`, `gemini`,
 `firebase`, `ai-assistant`.
@@ -57,7 +58,25 @@ docs/                     Plan, architecture, décisions, contrat de l'API
 
 ## Déployer
 
-`npx nx build api` produit un seul fichier, `dist/apps/api/main.js` : le code de l'app et des libs
-y est regroupé, les paquets npm restent externes. Sur l'hôte : `npm ci --omit=dev` à la racine,
-puis `node dist/apps/api/main.js`, avec la configuration de `apps/api/.env.example` en variables
-d'environnement. `GET /health` sert de sonde de vie.
+### Vercel (production)
+
+L'API est une fonction Vercel ([ADR 0009](docs/adr/0009-hebergement-vercel.md)). Chaque push sur
+`main` déploie en production, chaque branche a son déploiement de prévisualisation.
+
+- **Projet** : importer le dépôt, préréglage « Other », racine du dépôt. `vercel.json` donne les
+  commandes (`npm ci`, puis `npx nx run api:vercel-build`, qui écrit `.vercel/output`) : rien à
+  régler dans le tableau de bord.
+- **Variables** : celles de `apps/api/.env.example`, avec `NODE_ENV=production`,
+  `TRUST_PROXY=true`, `WORKFLOW_STATE_STORE=firestore` et le compte de service Firebase
+  (`FIREBASE_PRIVATE_KEY` accepte les `\n` échappés). `PORT` et `HOST` ne servent pas.
+  `ASSISTANT_TURN_OWNERSHIP_SECONDS` vient de la fonction elle-même.
+- **Fonction** : Node 24, région `fra1`, 300 s au plus (`tools/vercel/build-output.mjs`).
+- `GET /health` répond quand la fonction démarre ; `/docs` sert la documentation.
+
+### Serveur Node
+
+`npx nx build api` produit `dist/apps/api/main.js` (et `serverless.js`, l'entrée de Vercel) : le
+code de l'app et des libs y est regroupé, les paquets npm restent externes. Sur l'hôte :
+`npm ci --omit=dev` à la racine, puis `node dist/apps/api/main.js`, avec la configuration de
+`apps/api/.env.example` en variables d'environnement. Un seul processus : laisser
+`ASSISTANT_TURN_OWNERSHIP_SECONDS` à 0. `GET /health` sert de sonde de vie.

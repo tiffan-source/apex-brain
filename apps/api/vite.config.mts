@@ -11,14 +11,21 @@ export default defineConfig(() => ({
   resolve: { tsconfigPaths: true },
   build: {
     // Un bundle Node : le code de l'app et des libs est regroupé, les paquets npm restent externes.
-    ssr: 'src/main.ts',
+    // Deux points d'entrée sur le même code : `main.js` écoute sur un port (serveur Node,
+    // développement), `serverless.js` est la fonction Vercel (ADR 0009).
+    ssr: true,
     outDir: '../../dist/apps/api',
     emptyOutDir: true,
     target: 'node22',
     sourcemap: true,
     minify: false,
     rollupOptions: {
-      output: { format: 'es' as const, entryFileNames: 'main.js' },
+      input: { main: 'src/main.ts', serverless: 'src/serverless.ts' },
+      output: {
+        format: 'es' as const,
+        entryFileNames: '[name].js',
+        chunkFileNames: 'chunks/[name]-[hash].js',
+      },
     },
   },
   test: {

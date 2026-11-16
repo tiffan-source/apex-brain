@@ -31,6 +31,8 @@ Firestore à chaque transition, interrogé chaque seconde par l'écran.
 ## Conséquences
 
 - Un seul processus doit servir les workflows d'un même objectif (les acteurs vivent en mémoire).
-  Plusieurs instances demanderont un routage par objectif ou un verrou partagé.
+  Plusieurs instances demanderont un routage par objectif ou un verrou partagé. Revu par
+  l'[ADR 0009](./0009-hebergement-vercel.md) : sur Vercel, l'état persisté fait foi et un tour
+  appartient à l'instance qui le mène.
 - L'interrogation chaque seconde est conservée pour la compatibilité ; un flux SSE la remplacera.
 - Un outil d'écriture interrompu par un redémarrage pendant son exécution peut être rejoué.
