@@ -5,6 +5,7 @@ import { IdGenerator } from '@org/chore';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import { IWorkflowStateRepository } from '@org/ai-assistant';
+import { UsageLedger, UsagePolicySource } from '@org/usage';
 
 /**
  * Les ports que les modules métier attendent de l'infrastructure. Un module d'adaptateurs (Supabase,
@@ -21,4 +22,6 @@ export const PORTS = [
   AddMessageCommand,
   InteractiveAIProvider,
   IWorkflowStateRepository,
+  UsagePolicySource,
+  UsageLedger,
 ] as const;

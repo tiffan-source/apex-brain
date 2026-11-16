@@ -23,7 +23,7 @@ npx nx serve api                     # http://localhost:3000, documentation sur 
 ```
 
 En local, `WORKFLOW_STATE_STORE=memory` évite d'avoir besoin de Firestore (l'état des
-conversations en cours est alors perdu au redémarrage).
+conversations en cours et les compteurs des politiques d'usage sont alors perdus au redémarrage).
 
 ## Commandes
 
@@ -38,7 +38,7 @@ Tout passe par Nx (`npx nx …`), comme dans Apex.
 | Seulement ce qui a changé | `npx nx affected -t vite:test lint typecheck` |
 | Intégration contre le Supabase local | `npx nx run api:test-integration` (variables de `supabase status -o env`) |
 
-Projets : `api`, `chore`, `objective`, `user`, `auth`, `chat`, `ai`, `supabase`, `gemini`,
+Projets : `api`, `chore`, `objective`, `user`, `auth`, `usage`, `chat`, `ai`, `supabase`, `gemini`,
 `firebase`, `ai-assistant`.
 
 ## Structure
@@ -48,6 +48,7 @@ apps/api/                 Application NestJS : racine de composition et adaptate
 libs/chore/               Noyau partagé (Result, CoreError, IdGenerator)
 libs/objective|chat/      Domaines : cas d'usage, ports, modèles, queries, erreurs
 libs/user|auth/           Identité : la personne, ses rôles, la connexion
+libs/usage/               Politiques d'usage : qui peut faire quelle action, et combien de fois
 libs/ai/                  Capacité générique de génération IA
 libs/supabase|gemini|firebase/  Adaptateurs d'infrastructure
 workflows/ai-assistant/   Orchestrateur XState de l'assistant

@@ -20,6 +20,7 @@ import { IdGenerator } from '@org/chore';
 import { ObjectiveInternalService, ObjectiveRepository } from '@org/objective';
 import type { Environment } from '../config/environment';
 import { APP_ENVIRONMENT } from '../config/environment';
+import { AssistantTurnEvents } from './assistant-turn.events';
 import { AssistantController } from './assistant.controller';
 
 /** Toutes les minutes, les workflows au repos depuis trop longtemps quittent la mémoire. */
@@ -29,6 +30,7 @@ const EVICTION_INTERVAL_MS = 60_000;
 @Module({
   controllers: [AssistantController],
   providers: [
+    AssistantTurnEvents,
     {
       provide: ObjectiveInternalService,
       useFactory: (repository: ObjectiveRepository, ids: IdGenerator) =>
@@ -57,6 +59,7 @@ const EVICTION_INTERVAL_MS = 60_000;
         systemContext: SystemContextProvider,
         ids: IdGenerator,
         states: IWorkflowStateRepository,
+        turns: AssistantTurnEvents,
       ) => {
         const logger = new Logger('Assistant');
         return new SendMessageToAIWorkflow(
@@ -81,6 +84,8 @@ const EVICTION_INTERVAL_MS = 60_000;
                   : logger.error(message, error instanceof Error ? error.stack : String(error)),
               warn: (message) => logger.warn(message),
             },
+            // Un fait, publié pour qui veut l'entendre : le workflow ne sait pas qui écoute.
+            onTurnEnded: (turn) => turns.publish(turn),
           },
         );
       },
@@ -93,10 +98,11 @@ const EVICTION_INTERVAL_MS = 60_000;
         SystemContextProvider,
         IdGenerator,
         IWorkflowStateRepository,
+        AssistantTurnEvents,
       ],
     },
   ],
-  exports: [SendMessageToAIWorkflow],
+  exports: [SendMessageToAIWorkflow, AssistantTurnEvents],
 })
 export class AssistantModule implements OnModuleInit, OnApplicationShutdown {
   private evictionTimer?: NodeJS.Timeout;

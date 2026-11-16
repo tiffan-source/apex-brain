@@ -7,6 +7,7 @@ import {
   IWorkflowStateRepository,
   WORKFLOW_READY_FOR_NEW_MESSAGE,
   WorkflowContext,
+  WorkflowError,
   WorkflowState,
   WorkflowStateValue,
 } from '../model/workflow.model';
@@ -28,12 +29,29 @@ export interface WorkflowLogger {
   warn(message: string): void;
 }
 
+/** La fin d'un tour : le workflow est revenu au repos, après une réponse ou après une panne. */
+export type TurnEnded = {
+  objectiveId: string;
+  /** La personne propriétaire de la conversation, qui a lancé le tour. */
+  ownerId: string;
+  /** `failed` : une panne a arrêté le tour (le `lastError` de l'état). */
+  outcome: 'completed' | 'failed';
+  /** Le code de la panne, quand le tour a échoué. */
+  errorCode?: string;
+};
+
 export type SendMessageToAIWorkflowOptions = {
   /** Après ce délai sans activité, un workflow au repos quitte la mémoire (il reste persisté). Défaut : 30 min. */
   idleTimeoutMs?: number;
   /** Observateur d'inspection XState (désactivé par défaut). */
   inspect?: Observer<InspectionEvent> | ((event: InspectionEvent) => void);
   logger?: WorkflowLogger;
+  /**
+   * Appelé à la fin de chaque tour, réussi ou arrêté par une panne. Le workflow annonce un fait sans rien
+   * attendre en retour : les politiques d'usage s'en servent pour rendre l'unité d'un tour en panne
+   * (docs/adr/0010-politiques-d-usage.md). Une erreur de l'écouteur est journalisée, jamais remontée.
+   */
+  onTurnEnded?: (turn: TurnEnded) => void;
 };
 
 type TrackedWorkflow = {
@@ -318,6 +336,7 @@ export class SendMessageToAIWorkflow {
     };
 
     let lastReportedError = actor.getSnapshot().context.lastError?.at;
+    let previousValue = actor.getSnapshot().value;
 
     tracked.subscription = actor.subscribe({
       next: (snapshot) => {
@@ -330,7 +349,18 @@ export class SendMessageToAIWorkflow {
           this.logger.error(`Workflow ${objectiveId}: ${error.code} during ${error.step}: ${error.message}`);
         }
 
+        // Le repos n'est atteint qu'à la fin d'un tour. Un acteur restauré en plein tour (redémarrage) part
+        // de son étape en cours : sa fin de tour est annoncée elle aussi.
+        const turnEnded =
+          previousValue !== WORKFLOW_READY_FOR_NEW_MESSAGE &&
+          snapshot.value === WORKFLOW_READY_FOR_NEW_MESSAGE;
+        previousValue = snapshot.value;
+
         this.schedulePersist(objectiveId, tracked, snapshot);
+
+        if (turnEnded) {
+          this.announceTurnEnd(objectiveId, ownerId, error);
+        }
       },
       error: (error) => this.logger.error(`Workflow ${objectiveId} stopped on an unexpected error`, error),
     });
@@ -361,6 +391,22 @@ export class SendMessageToAIWorkflow {
     tracked.persisting = tracked.persisting
       .then(() => this.deps.workflowStateRepository.save(state))
       .catch((error) => this.logger.error(`Failed to persist workflow ${objectiveId}`, error));
+  }
+
+  /** Annoncer la fin d'un tour : la panne qui reste dans le contexte au repos est celle de ce tour. */
+  private announceTurnEnd(objectiveId: string, ownerId: string, error: WorkflowError | undefined): void {
+    if (!this.options.onTurnEnded) return;
+
+    try {
+      this.options.onTurnEnded({
+        objectiveId,
+        ownerId,
+        outcome: error ? 'failed' : 'completed',
+        ...(error ? { errorCode: error.code } : {}),
+      });
+    } catch (listenerError) {
+      this.logger.error(`Workflow ${objectiveId}: the turn-end listener failed`, listenerError);
+    }
   }
 
   private async release(objectiveId: string, tracked: TrackedWorkflow): Promise<void> {

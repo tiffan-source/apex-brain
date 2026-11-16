@@ -31,6 +31,8 @@
       "@org/objective/bff": ["./libs/objective/src/bff.ts"],
       "@org/user": ["./libs/user/src/index.ts"],
       "@org/auth": ["./libs/auth/src/index.ts"],
+      "@org/usage": ["./libs/usage/src/index.ts"],
+      "@org/usage/testing": ["./libs/usage/src/testing.ts"],
       "@org/auth/testing": ["./libs/auth/src/testing.ts"],
       "@org/chat": ["./libs/chat/src/index.ts"],
       "@org/chat/testing": ["./libs/chat/src/testing.ts"],

@@ -25,6 +25,8 @@ export const ERROR_STATUS: Readonly<Record<string, HttpStatus>> = {
   INVALID_SESSION: HttpStatus.UNAUTHORIZED,
   EMAIL_NOT_CONFIRMED: HttpStatus.FORBIDDEN,
   FORBIDDEN: HttpStatus.FORBIDDEN,
+  // Pas 429 : attendre ne débloque rien, sauf à la fin d'une période (docs/adr/0010-politiques-d-usage.md).
+  QUOTA_EXCEEDED: HttpStatus.FORBIDDEN,
   NOT_FOUND: HttpStatus.NOT_FOUND,
   OBJECTIVE_NOT_FOUND: HttpStatus.NOT_FOUND,
   TASK_NOT_FOUND: HttpStatus.NOT_FOUND,
@@ -63,6 +65,22 @@ export function forbidden(): DomainFailureException {
   return new DomainFailureException({
     code: 'FORBIDDEN',
     message: 'None of your roles grants access to this route',
+  });
+}
+
+/** La personne est connectée, mais aucun de ses rôles n'a droit à cette action d'usage. */
+export function actionForbidden(action: string): DomainFailureException {
+  return new DomainFailureException({
+    code: 'FORBIDDEN',
+    message: `None of your roles grants access to ${action}`,
+  });
+}
+
+/** La personne a utilisé tout son quota pour cette action, sur la période en cours. */
+export function quotaExceeded(action: string, quota: number, period: string): DomainFailureException {
+  return new DomainFailureException({
+    code: 'QUOTA_EXCEEDED',
+    message: `Usage quota reached for ${action} (${quota} per ${period})`,
   });
 }
 

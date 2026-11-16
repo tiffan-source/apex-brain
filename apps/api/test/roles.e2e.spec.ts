@@ -71,7 +71,7 @@ describe('Rôles (e2e)', () => {
     expect(response.body.error.code).toBe('UNAUTHENTICATED');
   });
 
-  it('ne change rien aux routes sans @Roles : un compte de base y accède', async () => {
+  it('ne change rien aux routes sans @Roles : un compte standard y accède', async () => {
     const basic = t.signIn('basique@apex.test');
 
     expect((await get('/v2/bff/objective-tree', basic.authorization)).status).toBe(200);

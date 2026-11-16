@@ -219,6 +219,48 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
     expect((await http().post('/v2/auth/logout').set('Authorization', renewed)).status).toBe(204);
   });
 
+  it("limite un compte standard à trois messages, d'après les politiques en base", async () => {
+    // Inscrite sans rôle : standard. Les politiques viennent de la migration, les compteurs de la mémoire.
+    const carole = await register('carole');
+    const as = { Authorization: carole.authorization };
+    const objectiveId = (await http().post('/v2/objectives').set(as).send({ title: 'Lire plus' })).body
+      .id as string;
+
+    const usage = async () => (await http().get('/v2/usage').set(as)).body;
+    expect((await http().get('/v2/auth/me').set(as)).body.roles).toEqual(['standard']);
+    await expect(usage()).resolves.toEqual({
+      actions: [
+        {
+          action: 'assistant.send-message',
+          access: 'limited',
+          quota: 3,
+          used: 0,
+          remaining: 3,
+          period: 'lifetime',
+          resetsAt: null,
+        },
+      ],
+    });
+
+    for (let turn = 0; turn < 3; turn++) {
+      ai.willRespond(ai.text(`Réponse ${turn + 1}.`));
+      const accepted = await http()
+        .post(`/v2/objectives/${objectiveId}/assistant/messages`)
+        .set(as)
+        .send({ message: `Question ${turn + 1}` });
+      expect(accepted.status).toBe(202);
+      await waitForStatus(objectiveId, carole.authorization, 'ready');
+    }
+
+    const refused = await http()
+      .post(`/v2/objectives/${objectiveId}/assistant/messages`)
+      .set(as)
+      .send({ message: 'Une de plus ?' });
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.code).toBe('QUOTA_EXCEEDED');
+    await expect(usage()).resolves.toMatchObject({ actions: [{ used: 3, remaining: 0 }] });
+  });
+
   it('supprime un pas, une étape puis un objectif et sa conversation, au nom de sa propriétaire seulement', async () => {
     const alice = await register('alice');
     const mallory = await register('mallory');

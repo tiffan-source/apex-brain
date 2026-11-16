@@ -183,6 +183,50 @@ export type Database = {
           },
         ]
       }
+      usage_actions: {
+        Row: {
+          action: string
+          description: string
+        }
+        Insert: {
+          action: string
+          description: string
+        }
+        Update: {
+          action?: string
+          description?: string
+        }
+        Relationships: []
+      }
+      usage_policies: {
+        Row: {
+          action: string
+          period: string
+          quota: number | null
+          role: string
+        }
+        Insert: {
+          action: string
+          period?: string
+          quota?: number | null
+          role: string
+        }
+        Update: {
+          action?: string
+          period?: string
+          quota?: number | null
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "usage_policies_action_fkey"
+            columns: ["action"]
+            isOneToOne: false
+            referencedRelation: "usage_actions"
+            referencedColumns: ["action"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
