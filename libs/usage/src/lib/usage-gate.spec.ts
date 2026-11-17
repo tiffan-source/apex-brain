@@ -1,6 +1,5 @@
 import { UsagePolicy } from './models/usage-policy';
 import { InMemoryUsageLedger } from './persistence/in-memory-usage-ledger';
-import { usageCounterId } from './protocols/usage-ledger';
 import { InMemoryUsagePolicySource } from './testing/in-memory-usage-policy.source';
 import { Reservation, UsageGate, UsagePerson } from './usage-gate';
 
@@ -142,12 +141,15 @@ describe('UsageGate', () => {
       await expect(gate.reserve(upgraded, SEND)).resolves.toMatchObject({ granted: true });
       await expect(gate.reserve(alice, SEND)).resolves.toMatchObject({ granted: false, used: 3 });
 
-      expect([...ledger.counts.keys()].sort()).toEqual(
-        [
-          usageCounterId({ ownerId: 'alice', action: SEND, role: 'premium', window: 'lifetime' }),
-          usageCounterId({ ownerId: 'alice', action: SEND, role: 'standard', window: 'lifetime' }),
-        ].sort(),
-      );
+      const counterOf = (role: 'standard' | 'premium') => ({
+        ownerId: 'alice',
+        action: SEND,
+        role,
+        window: 'lifetime',
+      });
+      await expect(ledger.used(counterOf('standard'))).resolves.toBe(3);
+      await expect(ledger.used(counterOf('premium'))).resolves.toBe(1);
+      expect(ledger.counts.size).toBe(2);
     });
   });
 

@@ -1,5 +1,4 @@
 import type { TakeResult, UsageCounter, UsageLedger } from '@org/usage';
-import { usageCounterId } from '@org/usage';
 
 const COLLECTION = 'usage-counters';
 
@@ -79,7 +78,7 @@ export class FirestoreUsageLedger implements UsageLedger {
   }
 
   private reference(counter: UsageCounter): CounterReference {
-    return this.firebase.db.collection(COLLECTION).doc(usageCounterId(counter));
+    return this.firebase.db.collection(COLLECTION).doc(counterDocumentId(counter));
   }
 
   private document(counter: UsageCounter, used: number): UsageCounterDocument {
@@ -92,6 +91,14 @@ export class FirestoreUsageLedger implements UsageLedger {
       updatedAt: this.now().toISOString(),
     };
   }
+}
+
+/**
+ * L'id du document d'un compteur : ses parties encodées, séparées par `|`. Une partie ne peut donc ni contenir
+ * de `/`, interdit dans un id Firestore, ni se confondre avec sa voisine.
+ */
+export function counterDocumentId(counter: UsageCounter): string {
+  return [counter.ownerId, counter.action, counter.role, counter.window].map(encodeURIComponent).join('|');
 }
 
 /** Le compte d'un document ; 0 pour un compteur absent ou illisible. */

@@ -13,9 +13,8 @@ export function isUsagePeriod(value: unknown): value is UsagePeriod {
 }
 
 /**
- * Une politique d'usage, une ligne de la table `usage_policies` : ce rôle peut faire cette action `quota` fois
- * par période, ou sans limite. Une action qu'aucune politique ne nomme est libre
- * (voir docs/adr/0010-politiques-d-usage.md).
+ * Une politique d'usage : ce rôle peut faire cette action `quota` fois par période, ou sans limite. Une action
+ * qu'aucune politique ne nomme est libre (voir docs/adr/0010-politiques-d-usage.md).
  */
 export type UsagePolicy = {
   /** L'action gouvernée, telle qu'une route la déclare (`assistant.send-message`). */

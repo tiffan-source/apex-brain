@@ -1,6 +1,6 @@
 import { GrantedReservation } from './usage-gate';
 
-/** L'issue d'une action acceptée, connue après la réponse. */
+/** L'issue d'une action acceptée, connue après coup. */
 export type HeldOutcome = 'succeeded' | 'failed';
 
 type Held = { reservation: GrantedReservation; heldAt: number };
@@ -15,12 +15,12 @@ export type HeldReservationsOptions = {
 const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Les unités réservées pour une action dont l'issue arrive après la réponse HTTP : un message à Akari répond
- * `202`, puis le tour se joue. Elles sont tenues sous une clé jusqu'à ce que l'issue soit connue ; une issue en
- * panne rend l'unité.
+ * Les unités réservées pour une action dont l'issue n'est connue qu'après coup : l'action est acceptée, puis se
+ * joue. Elles sont tenues sous une clé jusqu'à ce que l'issue soit connue ; une issue en panne rend l'unité.
  *
- * En mémoire, comme les acteurs de l'assistant (un seul processus). Une réservation tenue plus de `maxAgeMs` est
- * oubliée et son unité reste consommée : un accord jamais donné, un objectif supprimé en plein tour.
+ * En mémoire : seule l'instance qui a tenu une réservation peut la régler. Une issue connue ailleurs (après un
+ * redémarrage, sur une autre instance) ne la retrouve pas, et l'unité reste consommée : jamais d'action offerte,
+ * au pire une unité perdue. Une réservation tenue plus de `maxAgeMs` est oubliée de même.
  */
 export class HeldReservations {
   private readonly held = new Map<string, Held[]>();
@@ -52,8 +52,8 @@ export class HeldReservations {
 
   /**
    * L'issue de la plus ancienne réservation de cette clé est connue : réussie, l'unité reste consommée ; en
-   * panne, elle est rendue. Sans effet quand rien n'est tenu (un compte sans limite, un tour commencé avant un
-   * redémarrage).
+   * panne, elle est rendue. Sans effet quand rien n'est tenu sous cette clé (une action qui n'a rien compté,
+   * une réservation tenue par une autre instance).
    */
   async settle(key: string, outcome: HeldOutcome): Promise<void> {
     const queue = this.held.get(key);

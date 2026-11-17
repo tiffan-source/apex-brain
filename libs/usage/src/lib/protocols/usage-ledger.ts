@@ -17,10 +17,7 @@ export type TakeResult = {
   used: number;
 };
 
-/**
- * Les compteurs d'usage, hors de la base métier : Firestore en production
- * (voir docs/adr/0010-politiques-d-usage.md).
- */
+/** Les compteurs d'usage, gardés hors des données métier (voir docs/adr/0010-politiques-d-usage.md). */
 export abstract class UsageLedger {
   /**
    * Prendre une unité si le compteur est sous la limite, en un seul geste : deux prises simultanées ne
@@ -33,12 +30,4 @@ export abstract class UsageLedger {
 
   /** Le compte actuel ; 0 pour un compteur qui n'a jamais servi. */
   abstract used(counter: UsageCounter): Promise<number>;
-}
-
-/**
- * L'identifiant stable d'un compteur (l'id de son document Firestore) : ses parties encodées, séparées par `|`.
- * Une partie ne peut donc ni contenir de `/`, interdit dans un id Firestore, ni se confondre avec sa voisine.
- */
-export function usageCounterId(counter: UsageCounter): string {
-  return [counter.ownerId, counter.action, counter.role, counter.window].map(encodeURIComponent).join('|');
 }

@@ -39,7 +39,7 @@ export type RefusedReservation =
 
 export type Reservation = GrantedReservation | RefusedReservation;
 
-/** Où en est une personne sur une action gouvernée (`GET /v2/usage`). */
+/** Où en est une personne sur une action gouvernée. */
 export type ActionUsage =
   | { action: string; access: 'unlimited' }
   | { action: string; access: 'denied' }

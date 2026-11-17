@@ -1,5 +1,6 @@
 import type { UsageCounter } from '@org/usage';
 import {
+  counterDocumentId,
   CounterReference,
   CounterSnapshot,
   CounterStore,
@@ -158,5 +159,14 @@ describe('FirestoreUsageLedger', () => {
     });
     await expect(ledger.used(counter)).resolves.toBe(0);
     await expect(ledger.take(counter, 3)).resolves.toEqual({ taken: true, used: 1 });
+  });
+});
+
+describe('counterDocumentId', () => {
+  it('rend un id de document Firestore valide, sans confusion entre les parties', () => {
+    expect(counterDocumentId(counter)).toBe('alice|assistant.send-message|standard|lifetime');
+    expect(counterDocumentId({ ...counter, ownerId: 'a/b|c' })).toBe(
+      'a%2Fb%7Cc|assistant.send-message|standard|lifetime',
+    );
   });
 });
