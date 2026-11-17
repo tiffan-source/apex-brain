@@ -6,6 +6,7 @@ import {
   WORKFLOW_READY_FOR_NEW_MESSAGE,
 } from '../model/workflow.model';
 import { initialWorkflowContext } from './machine';
+import type { TurnEnded } from './send-message-to-ai.workflow';
 
 const messagesOf = (harness: ReturnType<typeof createWorkflowHarness>) =>
   [...harness.chat.db.messages.values()].map(({ sender, content }) => ({ sender, content }));
@@ -538,6 +539,115 @@ describe('SendMessageToAIWorkflow', () => {
         step: 'RegisteringUserMessageInConversation',
       });
       expect(ai.calls).toHaveLength(0);
+    });
+  });
+
+  describe("la fin d'un tour, annoncée", () => {
+    const listen = () => {
+      const turns: TurnEnded[] = [];
+      return { turns, onTurnEnded: (turn: TurnEnded) => void turns.push(turn) };
+    };
+
+    it('annonce un tour réussi une seule fois, au retour au repos', async () => {
+      const { turns, onTurnEnded } = listen();
+      const { workflow, ai } = createWorkflowHarness({ onTurnEnded });
+      ai.willRespond(ai.text('Commence doucement.'));
+
+      await workflow.sendMessage('o1', 'alice', 'Par où commencer ?');
+      expect(turns).toEqual([]);
+      await waitForStatus(workflow, 'ready');
+
+      expect(turns).toEqual([{ objectiveId: 'o1', ownerId: 'alice', outcome: 'completed' }]);
+    });
+
+    it('annonce un tour arrêté par une panne, avec le code de la panne', async () => {
+      const { turns, onTurnEnded } = listen();
+      const { workflow, ai } = createWorkflowHarness({ onTurnEnded });
+      ai.willRespond(new AIProviderError('quota exceeded'), ai.text('Me revoilà.'));
+
+      await workflow.sendMessage('o1', 'alice', 'Tu es là ?');
+      await waitForStatus(workflow, 'ready');
+      await workflow.sendMessage('o1', 'alice', 'Et maintenant ?');
+      await waitForStatus(workflow, 'ready');
+
+      expect(turns).toEqual([
+        { objectiveId: 'o1', ownerId: 'alice', outcome: 'failed', errorCode: 'AI_PROVIDER_FAILURE' },
+        { objectiveId: 'o1', ownerId: 'alice', outcome: 'completed' },
+      ]);
+    });
+
+    it("n'annonce rien pendant l'attente d'un accord : le tour finit après la réponse de la personne", async () => {
+      const { turns, onTurnEnded } = listen();
+      const { workflow, ai } = createWorkflowHarness({ onTurnEnded });
+      ai.willRespond(
+        ai.toolCalls({
+          id: 'call-1',
+          name: 'createTask',
+          arguments: { objectiveId: 'o1', title: 'Courir 5 km', importance: 4, urgency: 2 },
+        }),
+        ai.text("C'est ajouté."),
+      );
+
+      await workflow.sendMessage('o1', 'alice', 'Ajoute un pas');
+      await waitForStatus(workflow, 'awaiting-permission');
+      expect(turns).toEqual([]);
+
+      await workflow.respondToPermission('o1', 'alice', true, 'call-1');
+      await waitForStatus(workflow, 'ready');
+      expect(turns).toEqual([{ objectiveId: 'o1', ownerId: 'alice', outcome: 'completed' }]);
+    });
+
+    it("annonce aussi la fin d'un tour repris après un redémarrage", async () => {
+      const { turns, onTurnEnded } = listen();
+      const harness = createWorkflowHarness();
+      harness.ai.willRespond(() => new Promise(() => undefined), new AIProviderError('down'));
+
+      await harness.workflow.sendMessage('o1', 'alice', 'Question');
+      await vi.waitFor(() => expect(harness.ai.calls).toHaveLength(1));
+      await harness.workflow.shutdown();
+
+      const restarted = harness.restart({ onTurnEnded });
+      await restarted.getState('o1', 'alice');
+      await waitForStatus(restarted, 'ready');
+
+      expect(turns).toEqual([
+        { objectiveId: 'o1', ownerId: 'alice', outcome: 'failed', errorCode: 'AI_PROVIDER_FAILURE' },
+      ]);
+    });
+
+    it("n'annonce rien pour un message refusé, ni pour un workflow simplement relu", async () => {
+      const { turns, onTurnEnded } = listen();
+      const { workflow, ai } = createWorkflowHarness({ onTurnEnded });
+      ai.willRespond(() => new Promise(() => undefined));
+
+      await workflow.sendMessage('o1', 'alice', 'Premier');
+      await expect(workflow.sendMessage('o1', 'alice', 'Second')).resolves.toMatchObject({
+        success: false,
+        error: { code: 'WORKFLOW_BUSY' },
+      });
+      await workflow.getState('m1', 'mallory');
+
+      expect(turns).toEqual([]);
+    });
+
+    it("garde le workflow debout quand l'écouteur échoue : l'erreur est journalisée", async () => {
+      const { workflow, ai } = createWorkflowHarness({
+        onTurnEnded: () => {
+          throw new Error('écouteur en panne');
+        },
+      });
+      ai.willRespond(ai.text('Un.'), ai.text('Deux.'));
+
+      await workflow.sendMessage('o1', 'alice', 'Un');
+      await waitForStatus(workflow, 'ready');
+      await workflow.sendMessage('o1', 'alice', 'Deux');
+      const state = await waitForStatus(workflow, 'ready');
+
+      expect(state.lastRegisteredMessage?.content).toBe('Deux.');
+      expect(silentLogger.errors).toEqual([
+        expect.objectContaining({ message: 'écouteur en panne' }),
+        expect.objectContaining({ message: 'écouteur en panne' }),
+      ]);
     });
   });
 

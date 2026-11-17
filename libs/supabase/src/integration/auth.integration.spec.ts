@@ -59,7 +59,8 @@ describe.skipIf(!integrationEnabled)('Supabase — authentification (intégratio
     expect((await auth.whoAmI(session.accessToken))?.roles).toEqual(['premium']);
 
     const basicSession = await auth.login(basic.email, basic.password);
-    expect((await auth.whoAmI(basicSession.accessToken))?.roles).toEqual([]);
+    // Aucun rôle enregistré : la personne est standard (rôle par défaut).
+    expect((await auth.whoAmI(basicSession.accessToken))?.roles).toEqual(['standard']);
   });
 
   it("ne reconnaît ni un jeton mal formé, ni une clé d'API", async () => {

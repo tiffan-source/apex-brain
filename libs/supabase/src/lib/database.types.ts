@@ -183,9 +183,64 @@ export type Database = {
           },
         ]
       }
+      usage_actions: {
+        Row: {
+          action: string
+          description: string
+          enforced: boolean
+        }
+        Insert: {
+          action: string
+          description: string
+          enforced?: boolean
+        }
+        Update: {
+          action?: string
+          description?: string
+          enforced?: boolean
+        }
+        Relationships: []
+      }
+      usage_policies: {
+        Row: {
+          action: string
+          period: string
+          quota: number | null
+          role: string
+        }
+        Insert: {
+          action: string
+          period?: string
+          quota?: number | null
+          role: string
+        }
+        Update: {
+          action?: string
+          period?: string
+          quota?: number | null
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "usage_policies_action_fkey"
+            columns: ["action"]
+            isOneToOne: false
+            referencedRelation: "usage_actions"
+            referencedColumns: ["action"]
+          },
+        ]
+      }
     }
     Views: {
-      [_ in never]: never
+      usage_policies_in_force: {
+        Row: {
+          action: string | null
+          period: string | null
+          quota: number | null
+          role: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       get_objective_subtree: {

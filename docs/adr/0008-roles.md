@@ -1,6 +1,7 @@
 # ADR 0008 — Rôles : sur la personne, vérifiés à l'entrée de l'API
 
-- Statut : proposé
+- Statut : proposé ; complété par l'[ADR 0010](./0010-politiques-d-usage.md), qui fait de `standard` un
+  rôle, le rôle par défaut (« basique n'est pas un rôle » ne vaut plus)
 - Date : 2026-11-12
 
 ## Contexte

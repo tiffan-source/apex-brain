@@ -27,7 +27,7 @@ describe('Authentification (e2e)', () => {
       id: expect.any(String),
       email: 'alice@apex.test',
       name: 'alice@apex.test',
-      roles: [],
+      roles: ['standard'],
     });
     expect(body.session).not.toBeNull();
   });
@@ -108,7 +108,7 @@ describe('Authentification (e2e)', () => {
     const basicMe = await t.http().get('/v2/auth/me').set('Authorization', basic.authorization);
     const premiumMe = await t.http().get('/v2/auth/me').set('Authorization', premium.authorization);
 
-    expect(userResponseSchema.parse(basicMe.body).roles).toEqual([]);
+    expect(userResponseSchema.parse(basicMe.body).roles).toEqual(['standard']);
     expect(userResponseSchema.parse(premiumMe.body).roles).toEqual(['premium']);
   });
 

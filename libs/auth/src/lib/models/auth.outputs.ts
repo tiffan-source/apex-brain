@@ -3,7 +3,7 @@ import { AuthSession } from './auth-session';
 
 /**
  * La personne telle que les cas d'usage la rendent : son nom d'affichage, à défaut son e-mail, et
- * ses rôles (vides pour un compte de base).
+ * ses rôles (`standard` quand aucun autre ne lui a été donné).
  */
 export type AuthenticatedUserOutput = {
   id: string;

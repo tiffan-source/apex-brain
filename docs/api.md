@@ -11,9 +11,12 @@ générer un client typé). Ce document-ci en donne la vue d'ensemble et les rè
   `404 NOT_FOUND` ([ADR 0007](./adr/0007-retrait-de-la-v1.md)).
 - **Authentification** : `Authorization: Bearer <accessToken>` sur toute route sauf
   `/v2/auth/register`, `/v2/auth/login`, `/v2/auth/refresh` et `/health`.
-- **Rôles** : une personne a des rôles (`admin`, `premium`), aucun pour un compte de base. Une
-  route réservée répond `403 FORBIDDEN` à une personne connectée dont aucun rôle ne l'ouvre ; aucune
-  route n'est réservée pour l'instant ([ADR 0008](./adr/0008-roles.md)).
+- **Rôles** : une personne a des rôles (`admin`, `premium`, `standard`) ; sans rôle enregistré, elle est
+  `standard`. Une route réservée répond `403 FORBIDDEN` à une personne connectée dont aucun rôle ne
+  l'ouvre ; aucune route n'est réservée pour l'instant ([ADR 0008](./adr/0008-roles.md)).
+- **Politiques d'usage** : certaines actions sont gouvernées par des politiques en base, qui disent quels
+  rôles y ont droit et combien de fois ([ADR 0010](./adr/0010-politiques-d-usage.md)). Une action refusée
+  répond `403 FORBIDDEN`, un quota atteint `403 QUOTA_EXCEEDED`. Voir [Politiques d'usage](#politiques-dusage).
 - **Corps** : JSON. Les dates en entrée acceptent `2027-04-01` ou un instant ISO 8601 ; en sortie,
   ce sont des instants ISO 8601 (`2027-04-01T00:00:00.000Z`).
 - **Réponses** : le corps d'une réponse réussie est la sortie du cas d'usage, telle quelle (mêmes
@@ -40,7 +43,7 @@ Le **code** est le contrat : le client choisit sa phrase d'après lui. Le **mess
 |---|---|
 | 400 | `VALIDATION_ERROR`, `BAD_REQUEST` (JSON illisible), `WEAK_PASSWORD`, `INVALID_EMAIL` |
 | 401 | `UNAUTHENTICATED` (jeton absent ou invalide), `INVALID_CREDENTIALS`, `INVALID_SESSION` |
-| 403 | `EMAIL_NOT_CONFIRMED`, `FORBIDDEN` (aucun rôle de la personne n'ouvre la route) |
+| 403 | `EMAIL_NOT_CONFIRMED`, `FORBIDDEN` (aucun rôle de la personne n'ouvre la route ou l'action), `QUOTA_EXCEEDED` (quota d'une action atteint pour la période) |
 | 404 | `OBJECTIVE_NOT_FOUND`, `TASK_NOT_FOUND`, `CONVERSATION_NOT_FOUND`, `NOT_FOUND` (route) |
 | 409 | `USER_ALREADY_EXIST`, `WORKFLOW_BUSY`, `NO_PENDING_PERMISSION` |
 | 429 | `TOO_MANY_REQUESTS` |
@@ -57,8 +60,8 @@ Le **code** est le contrat : le client choisit sa phrase d'après lui. Le **mess
 | `GET /v2/auth/me` | `GetCurrentUserUseCase` | — | `200 { id, name, email, roles }` |
 
 `user` vaut `{ id, name, email, roles }` (`name` : le nom d'affichage, à défaut l'e-mail ;
-`roles` : `admin`, `premium`, vide pour un compte de base, lus dans le jeton : un rôle donné compte
-au prochain renouvellement) ; `session` vaut `{ accessToken, refreshToken, expiresAt }`. `session` est `null` à l'inscription tant que
+`roles` : `admin`, `premium`, `standard`, jamais vide (`["standard"]` pour une personne sans autre rôle),
+lus dans le jeton : un rôle donné compte au prochain renouvellement) ; `session` vaut `{ accessToken, refreshToken, expiresAt }`. `session` est `null` à l'inscription tant que
 l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt` ou sur un `401`.
 
 ## Objectifs, étapes et pas (v2)
@@ -133,7 +136,7 @@ l'infrastructure implémente directement.
 |---|---|---|---|
 | `GET /v2/objectives/{objectiveId}/conversation` | `GetConversationsQuery` | — | `200 { id, messages: [{ id, sender, content, createdAt }] }` |
 | `GET /v2/objectives/{objectiveId}/assistant` | `startWorkFlow` + `getState` | — | `200 WorkflowState` |
-| `POST /v2/objectives/{objectiveId}/assistant/messages` | `sendMessage` | `{ message }` | `202 WorkflowState` |
+| `POST /v2/objectives/{objectiveId}/assistant/messages` | `sendMessage` (action d'usage `assistant.send-message`) | `{ message }` | `202 WorkflowState` |
 | `POST /v2/objectives/{objectiveId}/assistant/permission` | `respondToPermission` | `{ granted, toolCallId? }` | `202 WorkflowState` |
 
 Seul un objectif principal a une conversation (une étape, ou un objectif supprimé, répond
@@ -183,7 +186,8 @@ peut être `processing` avec `activity: null`.
 Un tour se déroule ainsi :
 
 1. `POST …/assistant/messages` → `202`, `status: processing`. Un message pendant un tour en cours
-   répond `409 WORKFLOW_BUSY`.
+   répond `409 WORKFLOW_BUSY`. Un message au-delà du quota de la personne répond
+   `403 QUOTA_EXCEEDED` (voir [Politiques d'usage](#politiques-dusage)) : rien n'est enregistré.
 2. Le client interroge `GET …/assistant` (Apex : chaque seconde) jusqu'à `ready` ou
    `awaiting-permission`. `activity` dit ce que fait Akari, `lastRegisteredMessage` donne le message
    enregistré à afficher.
@@ -193,6 +197,39 @@ Un tour se déroule ainsi :
    l'interrogation. Après un ajout accepté, recharger `GET /v2/bff/objective-tree`.
 4. Une panne (IA indisponible…) ramène à `ready` avec `lastError` : le message de la personne est
    enregistré, elle peut réessayer. `lastError` disparaît au message suivant.
+
+## Politiques d'usage
+
+Certaines actions sont gouvernées par des politiques écrites dans Supabase (tables `usage_actions` et
+`usage_policies`), relues à chaque requête : changer une politique, couper ou rallumer une action ne
+demande pas de déploiement ([ADR 0010](./adr/0010-politiques-d-usage.md)).
+
+| Action | Route | Politiques livrées |
+|---|---|---|
+| `assistant.send-message` | `POST /v2/objectives/{objectiveId}/assistant/messages` | `standard` : 3 au total ; `premium`, `admin` : sans limite |
+
+- Une action qu'aucune politique en vigueur ne nomme est libre : sans politique, ou coupée par son
+  interrupteur (`usage_actions.enforced`). Dès qu'une politique en vigueur la nomme, seuls les rôles listés
+  y ont accès (sinon `403 FORBIDDEN`), et le plus généreux des rôles de la personne l'emporte.
+- Un quota vaut par période : `lifetime` (ne repart jamais), `day` ou `month` (fenêtres UTC). Atteint :
+  `403 QUOTA_EXCEEDED`. Attendre ne débloque rien avant la période suivante.
+- Une unité est réservée avant l'action et rendue si l'action n'a pas lieu : refus de la route (`400`,
+  `404`, `409`), ou tour d'Akari arrêté par une panne (`lastError`). Répondre à une demande d'accord
+  (`…/assistant/permission`) et relire l'état ne comptent pas.
+
+| Méthode et route | `operationId` | Réponse |
+|---|---|---|
+| `GET /v2/usage` | `getMyUsage` | `200 { actions: ActionUsage[] }` |
+
+```text
+ActionUsage =
+  | { action, access: 'unlimited' }
+  | { action, access: 'denied' }
+  | { action, access: 'limited', quota, used, remaining, period, resetsAt }   // resetsAt : null pour lifetime
+```
+
+Seules les actions gouvernées sont listées, par ordre de nom. Le serveur reste seul juge : un client
+s'en sert pour l'affichage (« 2 messages restants », un écran premium sur `QUOTA_EXCEEDED`).
 
 ## Passer le client web d'Apex à l'API
 

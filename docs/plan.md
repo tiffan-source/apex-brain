@@ -28,11 +28,12 @@ apex-brain/
 ├── libs/objective/           Domaine objectifs / étapes / pas
 ├── libs/auth/                Authentification (identité)
 ├── libs/user/                La personne et ses rôles (identité)
+├── libs/usage/               Politiques d'usage : droits et quotas par rôle
 ├── libs/chat/                Domaine conversation
 ├── libs/ai/                  Capacité générique de génération IA (port)
 ├── libs/supabase/            Adaptateurs Supabase (données + auth)
 ├── libs/gemini/              Adaptateur Gemini (SDK @google/genai)
-├── libs/firebase/            Adaptateur Firestore (état des workflows)
+├── libs/firebase/            Adaptateur Firestore (état des workflows, compteurs d'usage)
 ├── workflows/ai-assistant/   Orchestrateur XState « envoyer un message à l'IA »
 └── supabase/                 Schéma de la base (migrations), désormais source de vérité
 ```
@@ -219,10 +220,20 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Base de données** : lancer Supabase depuis `apex-brain` et retirer `supabase/` d'Apex une
   fois le client migré ; verrouiller les règles Firestore (le navigateur n'y écrit plus).
 - **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE.
-- **Rôles** ([ADR 0008](./adr/0008-roles.md)) : `admin` et `premium`, lus dans
+- **Rôles** ([ADR 0008](./adr/0008-roles.md)) : `admin`, `premium` et `standard` (le rôle par défaut
+  d'une personne sans rôle enregistré, [ADR 0010](./adr/0010-politiques-d-usage.md)), lus dans
   `app_metadata.roles`, rendus par `/v2/auth/me`, vérifiés par `@Roles` et `RolesGuard`. Aucune
-  route n'est encore réservée. Restent à décider : les routes à réserver, et comment premium
-  s'obtient (un paiement en ferait peut-être une offre avec échéance plutôt qu'un rôle).
+  route n'est encore réservée. Reste à décider comment premium s'obtient (un paiement en ferait
+  peut-être une offre avec échéance plutôt qu'un rôle).
+- **Politiques d'usage** ([ADR 0010](./adr/0010-politiques-d-usage.md)) : droits et quotas par rôle
+  écrits dans Supabase (`usage_policies`, un interrupteur par action dans `usage_actions`), compteurs dans
+  Firestore (`usage-counters`), appliqués par `UsageInterceptor`. En vigueur : `assistant.send-message`, trois messages au total pour `standard`,
+  sans limite pour `premium` et `admin` ; `GET /v2/usage` dit à chacun ce qu'il lui reste. À venir :
+  le choix du modèle d'IA réservé à certains rôles (une action de plus, ses lignes, `@UsageAction`),
+  l'écran premium des clients sur `QUOTA_EXCEEDED`, et le nettoyage des compteurs `day`/`month` des
+  périodes passées (aucune politique n'en utilise encore). Les réservations qui attendent la fin d'un
+  tour vivent dans la mémoire de l'instance qui mène le tour : un tour repris ailleurs garde son unité
+  consommée.
 - **Étapes et pas sans ordre** : ils sont indépendants, aucun n'en attend un autre. Une étape est
   faite ou non faite, rien d'autre. Seul Akari le dérive encore (au moins un pas, tous faits :
   instructions, `getObjectiveTree`) ; depuis le retrait de la v1, l'API rend la colonne en base.

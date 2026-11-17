@@ -80,15 +80,30 @@ export default [
               bannedExternalImports: infrastructureImports,
             },
             {
+              // Les politiques d'usage (usage) : qui peut faire quelle action, et combien de fois. Elles
+              // lisent les rôles de la personne ; le métier, l'identité et les workflows ne les voient
+              // jamais (docs/adr/0010-politiques-d-usage.md).
+              sourceTag: 'type:policy',
+              onlyDependOnLibsWithTags: ['type:identity', 'type:kernel'],
+              bannedExternalImports: infrastructureImports,
+            },
+            {
               // Un workflow compose des domaines, sans jamais toucher à leur infrastructure.
               sourceTag: 'type:workflow',
               onlyDependOnLibsWithTags: ['type:domain', 'type:kernel'],
               bannedExternalImports: infrastructureImports,
             },
             {
-              // L'infrastructure implémente les ports du domaine, de l'identité et des workflows.
+              // L'infrastructure implémente les ports du domaine, de l'identité, des politiques et des
+              // workflows.
               sourceTag: 'type:infra',
-              onlyDependOnLibsWithTags: ['type:domain', 'type:identity', 'type:workflow', 'type:kernel'],
+              onlyDependOnLibsWithTags: [
+                'type:domain',
+                'type:identity',
+                'type:policy',
+                'type:workflow',
+                'type:kernel',
+              ],
             },
             {
               // L'application est la racine de composition : elle seule assemble tout.
@@ -98,6 +113,7 @@ export default [
                 'type:workflow',
                 'type:domain',
                 'type:identity',
+                'type:policy',
                 'type:kernel',
               ],
             },

@@ -1,11 +1,11 @@
-import { Role } from './role';
+import { DEFAULT_ROLE, Role, withDefaultRole } from './role';
 
 export class User {
   private readonly _uid: string;
   private readonly _email: string;
   private _emailVerified = false;
   private _displayName?: string;
-  private _roles: readonly Role[] = [];
+  private _roles: readonly Role[] = [DEFAULT_ROLE];
 
   constructor(uid: string, email: string) {
     this._uid = uid;
@@ -28,7 +28,7 @@ export class User {
     return this._displayName;
   }
 
-  /** Vide pour un compte de base. */
+  /** Jamais vide : `standard` pour une personne à qui aucun rôle n'a été donné. */
   get roles(): readonly Role[] {
     return this._roles;
   }
@@ -41,7 +41,8 @@ export class User {
     this._displayName = displayName;
   }
 
+  /** Chaque rôle une fois ; une liste vide redonne le rôle par défaut. */
   setRoles(roles: readonly Role[]): void {
-    this._roles = [...new Set(roles)];
+    this._roles = withDefaultRole(roles);
   }
 }

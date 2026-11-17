@@ -28,6 +28,7 @@ describe('v2 — document OpenAPI (e2e)', () => {
       ['/v2/tasks/{taskId}', 'delete', 'deleteTask'],
       ['/v2/tasks/today-focus', 'get', 'whatIsTodayFocus'],
       ['/v2/bff/objective-tree', 'get', 'getObjectiveTree'],
+      ['/v2/usage', 'get', 'getMyUsage'],
     ];
     for (const [path, method, operationId] of expected) {
       expect(operation(path, method)?.operationId, `${method.toUpperCase()} ${path}`).toBe(operationId);
@@ -35,6 +36,10 @@ describe('v2 — document OpenAPI (e2e)', () => {
     }
 
     expect(operation('/v2/bff/objective-tree', 'get').tags).toEqual(['bff']);
+    expect(operation('/v2/usage', 'get').tags).toEqual(['usage']);
+    expect(
+      operation('/v2/objectives/{objectiveId}/assistant/messages', 'post').responses['403'].description,
+    ).toContain('QUOTA_EXCEEDED');
     expect(document.components.schemas).toHaveProperty('ObjectiveTreeNode');
 
     // L'ancien vocabulaire n'existe plus en v2.

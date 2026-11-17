@@ -15,6 +15,7 @@ import { ApiExceptionFilter } from './http/api-exception.filter';
 import { createValidationPipe } from './http/validation.pipe';
 import { ObjectivesModule } from './objectives/objectives.module';
 import { throttlerOptions } from './rate-limit/rate-limit';
+import { UsageModule } from './usage/usage.module';
 
 export type AppModuleOptions = {
   environment: Environment;
@@ -41,6 +42,8 @@ export class AppModule {
         ObjectivesModule,
         ConversationModule,
         AssistantModule,
+        // Les politiques d'usage : un intercepteur global, après les gardes (docs/adr/0010-politiques-d-usage.md).
+        UsageModule,
       ],
       controllers: [HealthController],
       providers: [

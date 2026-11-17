@@ -5,7 +5,11 @@ import { IWorkflowStateRepository, InMemoryWorkflowStateRepository } from '@org/
 import { AuthProvider } from '@org/auth';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { IdGenerator, UuidIdGenerator } from '@org/chore';
-import { FirebaseClientDataAccess, FirebaseWorkflowStateRepository } from '@org/firebase';
+import {
+  FirebaseClientDataAccess,
+  FirebaseWorkflowStateRepository,
+  FirestoreUsageLedger,
+} from '@org/firebase';
 import { createGeminiInteractionsClient, GeminiInteractiveAIProvider } from '@org/gemini';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
@@ -17,7 +21,9 @@ import {
   SupabaseGetObjectiveTreeQuery,
   SupabaseObjectiveRepository,
   SupabaseTaskRepository,
+  SupabaseUsagePolicySource,
 } from '@org/supabase';
+import { InMemoryUsageLedger, UsageLedger, UsagePolicySource } from '@org/usage';
 import type { Environment } from '../config/environment';
 import { PORTS } from './ports';
 
@@ -34,6 +40,15 @@ export class ProductionAdaptersModule {
           secretKey: environment.SUPABASE_SECRET_KEY,
         }),
     };
+
+    // Firestore : l'état des workflows et les compteurs d'usage. Le client réutilise l'app Firebase déjà ouverte.
+    const firebase = () =>
+      new FirebaseClientDataAccess({
+        projectId: environment.FIREBASE_PROJECT_ID as string,
+        clientEmail: environment.FIREBASE_CLIENT_EMAIL,
+        privateKey: environment.FIREBASE_PRIVATE_KEY,
+        databaseId: environment.FIREBASE_DATABASE_ID,
+      });
 
     const fromSupabase = <T>(
       provide: abstract new (...args: never[]) => T,
@@ -68,14 +83,16 @@ export class ProductionAdaptersModule {
           useFactory: () =>
             environment.WORKFLOW_STATE_STORE === 'memory'
               ? new InMemoryWorkflowStateRepository()
-              : new FirebaseWorkflowStateRepository(
-                  new FirebaseClientDataAccess({
-                    projectId: environment.FIREBASE_PROJECT_ID as string,
-                    clientEmail: environment.FIREBASE_CLIENT_EMAIL,
-                    privateKey: environment.FIREBASE_PRIVATE_KEY,
-                    databaseId: environment.FIREBASE_DATABASE_ID,
-                  }),
-                ),
+              : new FirebaseWorkflowStateRepository(firebase()),
+        },
+        // Les politiques d'usage vivent dans Supabase, leurs compteurs hors de la base métier.
+        fromSupabase(UsagePolicySource, (client) => new SupabaseUsagePolicySource(client)),
+        {
+          provide: UsageLedger,
+          useFactory: () =>
+            environment.WORKFLOW_STATE_STORE === 'memory'
+              ? new InMemoryUsageLedger()
+              : new FirestoreUsageLedger(firebase()),
         },
       ],
       exports: [...PORTS],

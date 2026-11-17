@@ -13,6 +13,9 @@ import { SequentialIdGenerator } from '@org/chore/testing';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import { createInMemoryObjectiveInfrastructure } from '@org/objective/testing';
+import type { UsagePolicy } from '@org/usage';
+import { InMemoryUsageLedger, UsageLedger, UsagePolicySource } from '@org/usage';
+import { InMemoryUsagePolicySource } from '@org/usage/testing';
 import type { Role } from '@org/user';
 import request from 'supertest';
 import { PORTS } from '../../src/adapters/ports';
@@ -39,19 +42,32 @@ export const TEST_ENVIRONMENT = {
 class InMemoryAdaptersModule {}
 
 /**
- * L'application complète (modules, gardes, validation, filtre d'erreurs, configuration HTTP),
+ * Les politiques d'usage livrées par la migration `20261116200000_usage_policies.sql` : trois messages à Akari
+ * pour un compte standard, sans limite pour premium et admin.
+ */
+export const LAUNCH_USAGE_POLICIES: readonly UsagePolicy[] = [
+  { action: 'assistant.send-message', role: 'standard', quota: 3, period: 'lifetime' },
+  { action: 'assistant.send-message', role: 'premium', quota: null, period: 'lifetime' },
+  { action: 'assistant.send-message', role: 'admin', quota: null, period: 'lifetime' },
+];
+
+/**
+ * L'application complète (modules, gardes, intercepteurs, validation, filtre d'erreurs, configuration HTTP),
  * branchée sur des doublures en mémoire à la place de Supabase, Gemini et Firestore. `modules`
- * ajoute des modules propres à un test (des routes qui n'existent que pour lui).
+ * ajoute des modules propres à un test (des routes qui n'existent que pour lui). `usagePolicies` remplit la
+ * table des politiques d'usage : vide par défaut, toute action est libre (les politiques ont leurs tests).
  */
 export async function createTestApp(
   environmentOverrides: Record<string, string> = {},
-  options: { modules?: Type[] } = {},
+  options: { modules?: Type[]; usagePolicies?: readonly UsagePolicy[] } = {},
 ) {
   const objectives = createInMemoryObjectiveInfrastructure();
   const chat = createInMemoryChatInfrastructure();
   const auth = new InMemoryAuthProvider();
   const ai = new ScriptedAIProvider();
   const workflowStates = new InMemoryWorkflowStateRepository();
+  const usagePolicies = new InMemoryUsagePolicySource(options.usagePolicies ?? []);
+  const usageLedger = new InMemoryUsageLedger();
 
   // Comme le trigger de la base : chaque objectif principal reçoit sa conversation.
   objectives.db.onObjectiveCreated((row) => {
@@ -73,6 +89,8 @@ export async function createTestApp(
       { provide: AddMessageCommand, useValue: chat.addMessageCommand },
       { provide: InteractiveAIProvider, useValue: ai },
       { provide: IWorkflowStateRepository, useValue: workflowStates },
+      { provide: UsagePolicySource, useValue: usagePolicies },
+      { provide: UsageLedger, useValue: usageLedger },
     ],
     exports: [...PORTS],
   };
@@ -94,7 +112,19 @@ export async function createTestApp(
     return { id, accessToken, authorization: `Bearer ${accessToken}` };
   };
 
-  return { app, http, signIn, objectives, chat, auth, ai, workflowStates, close: () => app.close() };
+  return {
+    app,
+    http,
+    signIn,
+    objectives,
+    chat,
+    auth,
+    ai,
+    workflowStates,
+    usagePolicies,
+    usageLedger,
+    close: () => app.close(),
+  };
 }
 
 export type TestApp = Awaited<ReturnType<typeof createTestApp>>;
