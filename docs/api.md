@@ -201,14 +201,15 @@ Un tour se déroule ainsi :
 ## Politiques d'usage
 
 Certaines actions sont gouvernées par des politiques écrites dans Supabase (tables `usage_actions` et
-`usage_policies`), relues à chaque requête : changer une politique ne demande pas de déploiement
-([ADR 0010](./adr/0010-politiques-d-usage.md)).
+`usage_policies`), relues à chaque requête : changer une politique, couper ou rallumer une action ne
+demande pas de déploiement ([ADR 0010](./adr/0010-politiques-d-usage.md)).
 
 | Action | Route | Politiques livrées |
 |---|---|---|
 | `assistant.send-message` | `POST /v2/objectives/{objectiveId}/assistant/messages` | `standard` : 3 au total ; `premium`, `admin` : sans limite |
 
-- Une action qu'aucune politique ne nomme est libre. Dès qu'une politique la nomme, seuls les rôles listés
+- Une action qu'aucune politique en vigueur ne nomme est libre : sans politique, ou coupée par son
+  interrupteur (`usage_actions.enforced`). Dès qu'une politique en vigueur la nomme, seuls les rôles listés
   y ont accès (sinon `403 FORBIDDEN`), et le plus généreux des rôles de la personne l'emporte.
 - Un quota vaut par période : `lifetime` (ne repart jamais), `day` ou `month` (fenêtres UTC). Atteint :
   `403 QUOTA_EXCEEDED`. Attendre ne débloque rien avant la période suivante.

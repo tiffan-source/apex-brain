@@ -13,7 +13,8 @@ mois, une offre de lancement…), et certaines disparaîtront.
 Ce ne sont pas des règles métier. Sans la limite de trois messages, Akari reste exactement le même
 assistant ; sans la demande d'accord avant qu'il écrive, ce serait un autre produit. La demande d'accord
 vit donc dans la machine, la limite n'a rien à y faire : comme l'authentification et les rôles
-([ADR 0008](./0008-roles.md)), elle s'applique à l'entrée de l'API.
+([ADR 0008](./0008-roles.md)), elle s'applique à l'entrée de l'API. Et parce qu'elle est stratégique, on
+doit pouvoir la brancher, la débrancher et la régler sans toucher au code.
 
 `@Roles` ne suffit pas : il ouvre ou ferme une route, ne compte rien, et changer la liste des rôles demande
 un déploiement.
@@ -28,18 +29,22 @@ route la déclare avec `@UsageAction('assistant.send-message')`. Cette étiquett
 
 Les **politiques sont des données**, dans Supabase :
 
-- `usage_actions` : le catalogue des actions (une ligne par étiquette, avec sa description). Une politique ne
-  peut nommer qu'une action du catalogue : une faute de frappe est refusée par la base, au lieu de laisser
-  l'action libre en silence.
+- `usage_actions` : le catalogue des actions (une ligne par étiquette, avec sa description) et
+  l'**interrupteur** de chacune (`enforced`). Une politique ne peut nommer qu'une action du catalogue : une
+  faute de frappe est refusée par la base, au lieu de laisser l'action libre en silence.
 - `usage_policies` : `(action, role, quota, period)`. `quota` est un nombre de fois par période, `null`
   pour sans limite ; `period` vaut `lifetime`, `day` ou `month` (fenêtres UTC).
+- `usage_policies_in_force` : la vue que lit le serveur, les politiques des actions dont l'interrupteur est
+  allumé.
 
-Le serveur les relit à chaque décision : une ligne changée compte dès la requête suivante, sans déploiement.
+Le serveur relit la vue à chaque décision : une ligne changée, une action coupée ou rallumée comptent dès la
+requête suivante, sans déploiement.
 
 ### La règle de décision (`allowanceFor`, dans `libs/usage`)
 
-1. Une action qu'aucune politique ne nomme est **libre** : rien n'est vérifié ni compté. Débrancher une
-   politique, c'est supprimer ses lignes.
+1. Une action qu'aucune politique en vigueur ne nomme est **libre** : rien n'est vérifié ni compté. Pour
+   débrancher une action, on coupe son interrupteur : ses politiques restent en base, prêtes à être
+   rallumées.
 2. Dès qu'une politique la nomme, seuls les rôles listés y ont accès. Pour les autres : `403 FORBIDDEN`,
    comme une route dont aucun rôle de la personne n'ouvre l'accès.
 3. Entre les rôles de la personne, le plus généreux l'emporte : sans limite, sinon le plus grand quota, et à
@@ -71,13 +76,25 @@ jour à dix messages, chacun en a dix à partir de ce moment-là.
   panne). C'est le seul ajout au workflow : il annonce un fait et ne sait rien des politiques. La machine
   n'a pas changé.
 
+### Une lib du système, qui ignore son infrastructure
+
+Comme `libs/auth`, `libs/usage` est un mécanisme du système, pas du métier : c'est son tag qui le dit
+(`type:policy`, à côté de `type:identity`), et le lint interdit au métier et aux workflows de l'importer.
+Elle porte la logique qui ne dépend ni de NestJS ni du stockage : départager les rôles, calculer les
+périodes, réserver et rendre une unité.
+
+Elle ne sait pas où vivent les politiques ni les compteurs : ni la table, ni la vue, ni Firestore ne sont
+nommés dans la lib. Ses ports parlent de « politiques en vigueur » et de « compteurs » ; les adaptateurs
+savent le reste. Ce qui est « en vigueur » se décide même dans la base (l'interrupteur et la vue) : la lib
+n'en sait rien.
+
 ### Où vit quoi
 
 | Où | Quoi |
 |---|---|
 | `libs/usage` (tag `type:policy`) | modèles, décision (`allowanceFor`), fenêtres de temps, ports `UsagePolicySource` et `UsageLedger`, `UsageGate` (réserver, décrire l'usage), `HeldReservations` (réservations en attente d'une issue) |
-| `libs/supabase` | `SupabaseUsagePolicySource` : lit `usage_policies` |
-| `libs/firebase` | `FirestoreUsageLedger` : les compteurs, en transactions |
+| `libs/supabase` | `SupabaseUsagePolicySource` : lit la vue `usage_policies_in_force` |
+| `libs/firebase` | `FirestoreUsageLedger` : les compteurs, en transactions, et l'id de leurs documents |
 | `apps/api/src/usage/` | `UsageInterceptor` (intercepteur global), `GET /v2/usage`, l'écoute des fins de tour d'Akari |
 | `apps/api/src/http/usage-action.ts` | l'étiquette `@UsageAction` |
 
@@ -103,8 +120,11 @@ migrer. Cette règle remplace « basique n'est pas un rôle » de l'ADR 0008 : `
   update public.usage_policies set quota = 10, period = 'month'
   where action = 'assistant.send-message' and role = 'premium';
 
-  -- plus aucune limite sur les messages à Akari
-  delete from public.usage_policies where action = 'assistant.send-message';
+  -- débrancher les messages à Akari : plus rien n'est vérifié ni compté, les politiques sont gardées
+  update public.usage_actions set enforced = false where action = 'assistant.send-message';
+
+  -- les rebrancher, telles qu'on les avait laissées
+  update public.usage_actions set enforced = true where action = 'assistant.send-message';
   ```
 
 - Gouverner une nouvelle action : une ligne dans `usage_actions` (migration), ses politiques, et
@@ -118,10 +138,14 @@ migrer. Cette règle remplace « basique n'est pas un rôle » de l'ADR 0008 : `
   session, comme le prévoit l'ADR 0008 : il est lu dans le jeton.
 - Si Supabase ou Firestore ne répond pas, une action limitée est refusée (`500`) plutôt que laissée libre.
   Une action sans limite ne touche pas Firestore.
-- Les réservations qui attendent la fin d'un tour vivent en mémoire, comme les acteurs de l'assistant. Après
-  un redémarrage en plein tour, l'unité reste consommée même si le tour finit en panne. Une réservation est
-  oubliée (et reste consommée) après 24 heures : accord jamais donné, objectif supprimé en plein tour.
+- Les réservations qui attendent la fin d'un tour vivent dans la mémoire de l'instance qui a reçu le
+  message, et qui mène le tour. Si le tour finit ailleurs (après un redémarrage, ou repris par une autre
+  instance), l'unité reste consommée même si le tour finit en panne : jamais de message offert, au pire un
+  message perdu. Une réservation est oubliée de même après 24 heures (accord jamais donné, objectif supprimé
+  en plein tour).
 - Une requête refusée par la validation (`400`) réserve puis rend son unité : dans Nest, les intercepteurs
   passent avant les pipes.
+- Seul le serveur lit les tables et la vue, et il ne fait que les lire : la migration retire tout droit aux
+  clients et ne rend que la lecture à la clé secrète. On les modifie depuis l'éditeur SQL de Supabase.
 - `WORKFLOW_STATE_STORE=memory` garde aussi les compteurs en mémoire (développement : remis à zéro au
   redémarrage).

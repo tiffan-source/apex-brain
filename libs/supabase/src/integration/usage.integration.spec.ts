@@ -1,10 +1,8 @@
 import { SupabaseUsagePolicySource } from '../lib/usage/usage-policy.source';
 import { createIntegrationAccess, createTestUser, integrationEnabled } from './supabase-test-environment';
 
-const TABLES = ['usage_policies', 'usage_actions'] as const;
-
 describe.skipIf(!integrationEnabled)("Supabase — politiques d'usage (intégration)", () => {
-  it('lit les politiques livrées par la migration, par action puis par rôle', async () => {
+  it('lit les politiques livrées par la migration, en vigueur dès le départ', async () => {
     const source = new SupabaseUsagePolicySource(createIntegrationAccess());
 
     await expect(source.forAction('assistant.send-message')).resolves.toEqual([
@@ -25,23 +23,29 @@ describe.skipIf(!integrationEnabled)("Supabase — politiques d'usage (intégrat
     await signedIn.auth.signInWithPassword({ email: person.email, password: person.password });
 
     for (const client of [anonymous, signedIn]) {
-      for (const table of TABLES) {
-        const { data, error } = await client.from(table).select('*');
-        // Selon les droits par défaut de la base : refus de la table (42501), ou table lisible mais la RLS,
-        // sans aucune politique, ne laisse passer aucune ligne. Dans les deux cas, rien n'est lu.
+      const reads = await Promise.all([
+        client.from('usage_policies').select('*'),
+        client.from('usage_actions').select('*'),
+        client.from('usage_policies_in_force').select('*'),
+      ]);
+
+      for (const { data, error } of reads) {
+        // La migration retire tout droit aux clients (42501). Si une base en redonnait, la RLS, sans aucune
+        // politique, ne laisserait passer aucune ligne. Dans les deux cas, rien n'est lu.
         if (error) expect(error.code).toBe('42501');
         expect(data ?? []).toEqual([]);
       }
     }
   });
 
-  it("ne laisse pas une personne connectée s'offrir des messages en modifiant les politiques", async () => {
+  it("ne laisse pas une personne connectée s'offrir des messages : ni politique modifiée, ni action coupée", async () => {
     const person = await createTestUser('triche-politiques');
     const client = createIntegrationAccess().createAuthClient();
     await client.auth.signInWithPassword({ email: person.email, password: person.password });
 
     await client.from('usage_policies').update({ quota: 1000 }).eq('role', 'standard');
     await client.from('usage_policies').delete().eq('action', 'assistant.send-message');
+    await client.from('usage_actions').update({ enforced: false }).eq('action', 'assistant.send-message');
 
     const policies = await new SupabaseUsagePolicySource(createIntegrationAccess()).forAction(
       'assistant.send-message',

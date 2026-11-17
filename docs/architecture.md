@@ -79,10 +79,11 @@ domaine, rien hors du dossier `bff/` ne les lit.
   Supabase dans `app_metadata.roles` ; vérifiés par `RolesGuard` sur les routes marquées
   `@Roles([...])` ([ADR 0008](./adr/0008-roles.md)).
 - **Politiques d'usage** : `libs/usage` (décision, réservation, ports `UsagePolicySource` et
-  `UsageLedger`) ; politiques lues dans Supabase (`usage_policies`), compteurs dans Firestore
-  (`usage-counters`) ; appliquées par `UsageInterceptor` sur les routes marquées `@UsageAction`, après les
-  gardes ([ADR 0010](./adr/0010-politiques-d-usage.md)). Pour gouverner une nouvelle action : une ligne dans
-  `usage_actions` (migration), ses politiques, `@UsageAction` sur la route.
+  `UsageLedger`), qui ne sait pas où vivent politiques et compteurs ; politiques en vigueur lues dans
+  Supabase (vue `usage_policies_in_force` : les actions dont l'interrupteur `enforced` est allumé),
+  compteurs dans Firestore (`usage-counters`) ; appliquées par `UsageInterceptor` sur les routes marquées
+  `@UsageAction`, après les gardes ([ADR 0010](./adr/0010-politiques-d-usage.md)). Pour gouverner une
+  nouvelle action : une ligne dans `usage_actions` (migration), ses politiques, `@UsageAction` sur la route.
 - **Adaptateurs** : `libs/supabase`, `libs/gemini`, `libs/firebase`.
 - **Workflow de l'assistant** : `workflows/ai-assistant` ([ADR 0004](./adr/0004-orchestrateur.md),
   [PRD](./features/send-message-to-ai-prd.md)).

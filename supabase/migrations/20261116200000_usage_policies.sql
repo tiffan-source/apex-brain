@@ -2,8 +2,8 @@
 -- (docs/adr/0010-politiques-d-usage.md).
 --
 -- Des règles de produit, pas des règles métier : elles changent avec la stratégie, sans déploiement. Le
--- serveur relit ces tables à chaque décision, si bien qu'une ligne changée compte dès la requête suivante.
--- Une action qu'aucune politique ne nomme est libre ; débrancher une politique, c'est supprimer ses lignes.
+-- serveur lit les politiques en vigueur à chaque décision, si bien qu'une ligne changée compte dès la requête
+-- suivante. Une action est libre quand aucune politique ne la nomme, ou quand son interrupteur est coupé.
 -- Les compteurs vivent hors de cette base (Firestore, collection usage-counters).
 
 -- Le catalogue des actions que le serveur sait gouverner : une par étiquette @UsageAction du code. Une
@@ -11,11 +11,16 @@
 -- libre en silence.
 create table public.usage_actions (
   action text primary key,
-  description text not null
+  description text not null,
+  -- L'interrupteur : false, l'action est libre et ses politiques, gardées, ne s'appliquent pas.
+  enforced boolean not null default true
 );
 
 comment on table public.usage_actions is
-  'Les actions que le serveur sait gouverner (étiquettes @UsageAction). Voir docs/adr/0010-politiques-d-usage.md.';
+  'Les actions que le serveur sait gouverner (étiquettes @UsageAction), chacune avec son interrupteur. Voir '
+  'docs/adr/0010-politiques-d-usage.md.';
+comment on column public.usage_actions.enforced is
+  'false : l''action est libre, ses politiques restent en base sans s''appliquer. On rallume sans rien perdre.';
 
 create table public.usage_policies (
   action text not null references public.usage_actions (action) on update cascade on delete cascade,
@@ -33,16 +38,29 @@ comment on table public.usage_policies is
   'Ce rôle peut faire cette action quota fois par période (null : sans limite). Seuls les rôles listés ont '
   'accès à une action nommée ici ; le plus généreux des rôles d''une personne l''emporte.';
 
--- Lues par le serveur seulement (clé secrète) : aucun client ne les lit ni ne les modifie. On les change
--- depuis l'éditeur SQL de Supabase. Deux barrières : aucun droit pour les clients, même si la base en donne
--- par défaut aux nouvelles tables, et la RLS sans aucune politique.
+-- Ce que le serveur lit : les politiques des actions dont l'interrupteur est allumé. Les droits sont ceux de
+-- qui lit la vue (security_invoker), jamais ceux de son propriétaire.
+create view public.usage_policies_in_force with (security_invoker = true) as
+  select policy.action, policy.role, policy.quota, policy.period
+  from public.usage_policies as policy
+  join public.usage_actions as usage_action on usage_action.action = policy.action
+  where usage_action.enforced;
+
+comment on view public.usage_policies_in_force is
+  'Les politiques en vigueur : celles des actions dont l''interrupteur (usage_actions.enforced) est allumé.';
+
+-- Lues par le serveur seulement (clé secrète), qui ne les modifie jamais : on les change depuis l'éditeur SQL
+-- de Supabase. La base donne par défaut tous les droits sur une nouvelle table ou vue ; on les retire tous,
+-- puis on rend la seule lecture au serveur. Pour les clients, la RLS sans aucune politique est une seconde
+-- barrière.
 alter table public.usage_actions enable row level security;
 alter table public.usage_policies enable row level security;
 
-revoke all on table public.usage_actions, public.usage_policies from anon, authenticated;
+revoke all on table public.usage_actions, public.usage_policies, public.usage_policies_in_force
+  from anon, authenticated, service_role;
 
-grant select on table public.usage_actions to service_role;
-grant select on table public.usage_policies to service_role;
+grant select on table public.usage_actions, public.usage_policies, public.usage_policies_in_force
+  to service_role;
 
 -- Ce qu'Apex gouverne aujourd'hui : les messages à Akari. Trois au total pour un compte standard, sans limite
 -- pour premium et admin.

@@ -226,13 +226,14 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
   route n'est encore réservée. Reste à décider comment premium s'obtient (un paiement en ferait
   peut-être une offre avec échéance plutôt qu'un rôle).
 - **Politiques d'usage** ([ADR 0010](./adr/0010-politiques-d-usage.md)) : droits et quotas par rôle
-  écrits dans Supabase (`usage_policies`), compteurs dans Firestore (`usage-counters`), appliqués par
-  `UsageInterceptor`. En vigueur : `assistant.send-message`, trois messages au total pour `standard`,
+  écrits dans Supabase (`usage_policies`, un interrupteur par action dans `usage_actions`), compteurs dans
+  Firestore (`usage-counters`), appliqués par `UsageInterceptor`. En vigueur : `assistant.send-message`, trois messages au total pour `standard`,
   sans limite pour `premium` et `admin` ; `GET /v2/usage` dit à chacun ce qu'il lui reste. À venir :
   le choix du modèle d'IA réservé à certains rôles (une action de plus, ses lignes, `@UsageAction`),
   l'écran premium des clients sur `QUOTA_EXCEEDED`, et le nettoyage des compteurs `day`/`month` des
   périodes passées (aucune politique n'en utilise encore). Les réservations qui attendent la fin d'un
-  tour vivent en mémoire, comme les acteurs : à revoir avec plusieurs instances.
+  tour vivent dans la mémoire de l'instance qui mène le tour : un tour repris ailleurs garde son unité
+  consommée.
 - **Étapes et pas sans ordre** : ils sont indépendants, aucun n'en attend un autre. Une étape est
   faite ou non faite, rien d'autre. Seul Akari le dérive encore (au moins un pas, tous faits :
   instructions, `getObjectiveTree`) ; depuis le retrait de la v1, l'API rend la colonne en base.

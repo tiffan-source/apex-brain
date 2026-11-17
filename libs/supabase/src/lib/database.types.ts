@@ -187,14 +187,17 @@ export type Database = {
         Row: {
           action: string
           description: string
+          enforced: boolean
         }
         Insert: {
           action: string
           description: string
+          enforced?: boolean
         }
         Update: {
           action?: string
           description?: string
+          enforced?: boolean
         }
         Relationships: []
       }
@@ -229,7 +232,15 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      usage_policies_in_force: {
+        Row: {
+          action: string | null
+          period: string | null
+          quota: number | null
+          role: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       get_objective_subtree: {

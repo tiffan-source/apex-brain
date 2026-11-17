@@ -25,17 +25,18 @@ const rows = [
 ];
 
 describe('SupabaseUsagePolicySource', () => {
-  it("lit les politiques d'une action, triées par rôle", async () => {
+  it("lit les politiques en vigueur d'une action, triées par rôle", async () => {
     const { source, requests } = fakeSupabase(rows);
 
     await expect(source.forAction('assistant.send-message')).resolves.toEqual(rows);
 
-    expect(requests[0].pathname).toBe('/rest/v1/usage_policies');
+    // La vue ne garde que les actions dont l'interrupteur est allumé : la lib n'a pas à le savoir.
+    expect(requests[0].pathname).toBe('/rest/v1/usage_policies_in_force');
     expect(requests[0].searchParams.get('action')).toBe('eq.assistant.send-message');
     expect(requests[0].searchParams.get('order')).toBe('role.asc');
   });
 
-  it('lit toutes les politiques, triées par action puis par rôle', async () => {
+  it('lit toutes les politiques en vigueur, triées par action puis par rôle', async () => {
     const { source, requests } = fakeSupabase(rows);
 
     await expect(source.all()).resolves.toHaveLength(3);
@@ -60,6 +61,8 @@ describe('toUsagePolicy', () => {
       { ...valid, period: 'week' },
       { ...valid, quota: -1 },
       { ...valid, quota: 1.5 },
+      { ...valid, action: null },
+      { ...valid, role: null },
     ]) {
       expect(() => toUsagePolicy(invalid)).toThrow(/Invalid usage policy/);
     }
