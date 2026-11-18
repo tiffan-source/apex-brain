@@ -1,8 +1,8 @@
 /**
- * Ce qu'un compte a de plus qu'un compte de base. Un compte sans rôle est un compte de base :
- * « basique » n'est pas un rôle (voir docs/adr/0008-roles.md).
+ * Les rôles connus. Tout compte en a au moins un : chaque nouveau compte reçoit `standard` à sa
+ * création (trigger SQL), et un compte sans rôle n'a accès à rien (voir docs/adr/0008-roles.md).
  */
-export const ROLES = ['admin', 'premium'] as const;
+export const ROLES = ['standard', 'premium', 'admin'] as const;
 
 export type Role = (typeof ROLES)[number];
 

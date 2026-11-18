@@ -219,10 +219,13 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Base de données** : lancer Supabase depuis `apex-brain` et retirer `supabase/` d'Apex une
   fois le client migré ; verrouiller les règles Firestore (le navigateur n'y écrit plus).
 - **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE.
-- **Rôles** ([ADR 0008](./adr/0008-roles.md)) : `admin` et `premium`, lus dans
-  `app_metadata.roles`, rendus par `/v2/auth/me`, vérifiés par `@Roles` et `RolesGuard`. Aucune
-  route n'est encore réservée. Restent à décider : les routes à réserver, et comment premium
-  s'obtient (un paiement en ferait peut-être une offre avec échéance plutôt qu'un rôle).
+- **Rôles** ([ADR 0008](./adr/0008-roles.md)) : `standard`, `premium` et `admin`, lus dans
+  `app_metadata.roles`, rendus par `/v2/auth/me`, vérifiés par `@Roles` et `RolesGuard`. Tout
+  nouveau compte reçoit `standard` (trigger SQL), les comptes existants l'ont reçu par migration ;
+  un compte sans rôle n'a accès à rien. Seul l'envoi à Akari est réservé (aux trois rôles). En
+  cours : les quotas d'Akari par rôle ([#9](https://github.com/tiffan-source/apex-brain/issues/9)).
+  Reste à décider comment premium s'obtient (un paiement en ferait peut-être une offre avec
+  échéance plutôt qu'un rôle).
 - **Étapes et pas sans ordre** : ils sont indépendants, aucun n'en attend un autre. Une étape est
   faite ou non faite, rien d'autre. Seul Akari le dérive encore (au moins un pas, tous faits :
   instructions, `getObjectiveTree`) ; depuis le retrait de la v1, l'API rend la colonne en base.

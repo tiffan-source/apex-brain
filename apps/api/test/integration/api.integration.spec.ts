@@ -89,6 +89,9 @@ describe.skipIf(!enabled)('API contre Supabase (intégration)', () => {
     const mallory = await register('mallory');
     const as = (who: { authorization: string }) => ({ Authorization: who.authorization });
 
+    // Rôle : le trigger de la base donne standard dès le premier jeton, ce qui ouvre Akari plus bas.
+    expect((await http().get('/v2/auth/me').set(as(alice))).body.roles).toEqual(['standard']);
+
     // Objectif, étape, pas
     const objective = await http()
       .post('/v2/objectives')

@@ -30,7 +30,7 @@ describe("Cas d'usage d'authentification", () => {
         id: expect.any(String),
         name: 'alice@apex.test',
         email: 'alice@apex.test',
-        roles: [],
+        roles: ['standard'],
       });
       expect(result.data.session.expiresAt).toBeInstanceOf(Date);
       await expect(me.execute({ accessToken: result.data.session.accessToken })).resolves.toEqual({

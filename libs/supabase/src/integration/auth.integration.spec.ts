@@ -52,14 +52,28 @@ describe.skipIf(!integrationEnabled)('Supabase — authentification (intégratio
 
   it('lit les rôles dans app_metadata, à la connexion comme dans le jeton', async () => {
     const premium = await createTestUser('premium', { roles: ['premium', 'inconnu'] });
-    const basic = await createTestUser('basique');
 
     const session = await auth.login(premium.email, premium.password);
     expect(session.user.roles).toEqual(['premium']);
     expect((await auth.whoAmI(session.accessToken))?.roles).toEqual(['premium']);
+  });
 
-    const basicSession = await auth.login(basic.email, basic.password);
-    expect((await auth.whoAmI(basicSession.accessToken))?.roles).toEqual([]);
+  it('donne le rôle standard à toute inscription, dès son premier jeton', async () => {
+    const registration = await auth.register(freshEmail(), 'secret-123456');
+    const created = await createTestUser('sans-role');
+
+    expect(registration.user.roles).toEqual(['standard']);
+    expect((await auth.whoAmI(registration.session?.accessToken ?? ''))?.roles).toEqual(['standard']);
+    const session = await auth.login(created.email, created.password);
+    expect((await auth.whoAmI(session.accessToken))?.roles).toEqual(['standard']);
+  });
+
+  it("n'ajoute pas standard à un compte créé avec un rôle", async () => {
+    const admin = await createTestUser('admin', { roles: ['admin'] });
+
+    const session = await auth.login(admin.email, admin.password);
+
+    expect((await auth.whoAmI(session.accessToken))?.roles).toEqual(['admin']);
   });
 
   it("ne reconnaît ni un jeton mal formé, ni une clé d'API", async () => {

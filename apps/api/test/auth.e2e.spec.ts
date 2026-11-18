@@ -27,7 +27,8 @@ describe('Authentification (e2e)', () => {
       id: expect.any(String),
       email: 'alice@apex.test',
       name: 'alice@apex.test',
-      roles: [],
+      // Comme le trigger de la base : tout nouveau compte reçoit standard.
+      roles: ['standard'],
     });
     expect(body.session).not.toBeNull();
   });
@@ -102,14 +103,16 @@ describe('Authentification (e2e)', () => {
   });
 
   it('rend les rôles de la personne (GetCurrentUser)', async () => {
-    const basic = t.signIn('basique@apex.test');
+    const standard = t.signIn('standard@apex.test');
     const premium = t.signIn('premium@apex.test', ['premium']);
+    const withoutRole = t.signIn('sans-role@apex.test', []);
 
-    const basicMe = await t.http().get('/v2/auth/me').set('Authorization', basic.authorization);
-    const premiumMe = await t.http().get('/v2/auth/me').set('Authorization', premium.authorization);
+    const me = async (who: { authorization: string }) =>
+      userResponseSchema.parse((await t.http().get('/v2/auth/me').set('Authorization', who.authorization)).body);
 
-    expect(userResponseSchema.parse(basicMe.body).roles).toEqual([]);
-    expect(userResponseSchema.parse(premiumMe.body).roles).toEqual(['premium']);
+    expect((await me(standard)).roles).toEqual(['standard']);
+    expect((await me(premium)).roles).toEqual(['premium']);
+    expect((await me(withoutRole)).roles).toEqual([]);
   });
 
   it('exige un jeton valide sur toute route qui n’est pas publique', async () => {

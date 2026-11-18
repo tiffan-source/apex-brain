@@ -19,7 +19,9 @@ export const userResponseSchema = z.object({
   id: z.string(),
   name: z.string(),
   email: z.string(),
-  roles: z.array(z.enum(ROLES)).meta({ description: 'Vide pour un compte de base.' }),
+  roles: z.array(z.enum(ROLES)).meta({
+    description: 'Au moins `standard` pour tout compte ; vide si on lui a retiré ses rôles (accès à rien).',
+  }),
 });
 
 export const sessionResponseSchema = z.object({

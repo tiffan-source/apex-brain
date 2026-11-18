@@ -1,7 +1,7 @@
 # ADR 0008 — Rôles : sur la personne, vérifiés à l'entrée de l'API
 
 - Statut : proposé
-- Date : 2026-11-12
+- Date : 2026-11-12 ; révisé le 2026-11-18 (le rôle `standard`, [#10](https://github.com/tiffan-source/apex-brain/issues/10))
 
 ## Contexte
 
@@ -33,9 +33,19 @@ ne peut vérifier les droits de la personne qu'à l'entrée, quand elle lance ou
 Des rôles sur la personne, vérifiés à l'entrée de l'API.
 
 - **`libs/user`** (nouveau) porte `User`, sorti de `libs/auth`, et ses rôles :
-  `type Role = 'admin' | 'premium'`. « Basique » n'est pas un rôle, c'est l'absence de rôle : pas
-  d'état absurde comme `['basic', 'premium']`, et les comptes existants n'ont rien à migrer.
-  `auth` dépend de `user`, pas l'inverse : la personne ne sait pas comment on se connecte.
+  `type Role = 'standard' | 'premium' | 'admin'`. **Tout compte a au moins un rôle ; sans rôle,
+  accès à rien.** `auth` dépend de `user`, pas l'inverse : la personne ne sait pas comment on se
+  connecte.
+- **Le rôle `standard`** (révision) : la version d'origine faisait du compte de base l'absence de
+  rôle. Mais un accès limité (l'essai d'Akari, [#9](https://github.com/tiffan-source/apex-brain/issues/9))
+  a besoin d'un rôle à qui l'accorder, et « aucun rôle » doit pouvoir vouloir dire « accès à
+  rien ». Un trigger SQL `before insert on auth.users` ajoute `roles: ["standard"]` à
+  l'`app_metadata` d'un compte créé sans rôle (absent, pas un tableau, ou vide) : le rôle figure
+  dès le premier jeton, et l'opération est atomique avec l'inscription. Une migration le donne aux
+  comptes existants sans rôle ; ceux qui en ont déjà un ne bougent pas. Écarté : le donner depuis
+  le cas d'usage d'inscription, car `signUp` n'écrit pas `app_metadata`, l'appel suivant
+  (`updateUserById`) n'est pas atomique et le premier jeton serait sans rôle. Un compte peut
+  cumuler `standard` et `premium` : on ne retire pas `standard` à un passage premium.
 - **Stockage** : `app_metadata.roles` chez Supabase, que seule la clé secrète modifie. Jamais
   `user_metadata`, que la personne réécrit elle-même depuis un client. L'adaptateur les lit dans
   le jeton (`whoAmI`) et à la connexion ; `parseRoles` ignore ce qui n'est pas un rôle connu.
@@ -50,8 +60,10 @@ Des rôles sur la personne, vérifiés à l'entrée de l'API.
 
 ## Conséquences
 
-- Aucune route n'est réservée pour l'instant : les comptes existants, sans rôle, sont des comptes
-  de base et gardent tous leurs accès.
+- L'envoi d'un message à Akari (`POST …/assistant/messages`) est réservé à `standard`, `premium`
+  et `admin` : un compte sans rôle reçoit `403 FORBIDDEN`. La lecture de l'état et la réponse à une
+  demande d'accord restent ouvertes à qui possède la conversation, pour qu'un tour déjà lancé
+  puisse finir. Les autres routes restent ouvertes à toute personne connectée.
 - Donner un rôle se fait avec la clé secrète, par SQL ou par l'API d'administration :
 
   ```sql
@@ -67,8 +79,8 @@ Des rôles sur la personne, vérifiés à l'entrée de l'API.
   session.
 - Une route réservée documente son `403` (`@ApiResponse({ status: 403, description: 'FORBIDDEN' })`)
   et le teste en e2e.
-- Réserver Akari, c'est poser `@Roles` sur `AssistantController` : ses outils n'ont pas de jeton à
-  vérifier.
+- Réserver Akari, c'est poser `@Roles` sur les routes d'`AssistantController` : ses outils n'ont
+  pas de jeton à vérifier.
 - Un nouveau rôle s'ajoute à `ROLES` (`libs/user`) ; tant qu'il n'y est pas, il est ignoré à la
   lecture.
 - Si une même liste de rôles finit par se répéter sur beaucoup de routes, une table rôle →
