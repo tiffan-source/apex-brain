@@ -33,6 +33,19 @@ export type MachineDependencies = {
   idGenerator: IdGenerator;
   /** Horloge des pannes, remplaçable dans les tests. */
   now?: () => Date;
+  /**
+   * Appelé quand la réponse d'Akari est écrite, avant que le tour ne se termine. Un tour rejoué après
+   * un redémarrage peut l'appeler de nouveau, avec le même `replyMessageId`.
+   */
+  onTurnSucceeded?: (turn: SucceededTurn) => Promise<void>;
+};
+
+/** Un tour qui s'est terminé par une réponse d'Akari. */
+export type SucceededTurn = {
+  ownerId: string;
+  objectiveId: string;
+  /** L'id réservé pour la réponse d'Akari, le même si le tour est rejoué. */
+  replyMessageId: string;
 };
 
 export type WorkflowEvent =
@@ -116,9 +129,21 @@ export const getMachine = (deps: MachineDependencies) => {
       }),
     },
     actors: {
-      registerMessage: fromPromise<RegisterMessageResult, RegisterMessageInput>(({ input }) =>
-        deps.chatService.registerMessage(input),
-      ),
+      registerMessage: fromPromise<RegisterMessageResult, RegisterMessageInput>(async ({ input }) => {
+        const registered = await deps.chatService.registerMessage(input);
+
+        // La réponse d'Akari est écrite : le tour a réussi. On le signale dans le même acteur (et non
+        // dans un nouvel état) pour qu'un snapshot persisté pendant l'écriture reste restaurable.
+        if (input.senderId === AI_SENDER_ID) {
+          await deps.onTurnSucceeded?.({
+            ownerId: input.ownerId,
+            objectiveId: input.conversationExternalRef,
+            replyMessageId: input.messageId,
+          });
+        }
+
+        return registered;
+      }),
       generateResponse: fromPromise<
         AIResponse,
         TurnInput & { prompt: string; previousInteractionId?: string }

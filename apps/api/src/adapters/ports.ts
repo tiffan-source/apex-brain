@@ -1,4 +1,5 @@
 import { InteractiveAIProvider } from '@org/ai';
+import { AkariRuleSource, AkariUsageJournal, Clock } from '@org/akari-access';
 import { AuthProvider } from '@org/auth';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { IdGenerator } from '@org/chore';
@@ -21,4 +22,7 @@ export const PORTS = [
   AddMessageCommand,
   InteractiveAIProvider,
   IWorkflowStateRepository,
+  AkariRuleSource,
+  AkariUsageJournal,
+  Clock,
 ] as const;

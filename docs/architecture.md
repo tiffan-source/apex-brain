@@ -43,14 +43,15 @@ l'application NestJS `apps/api`.
 |---|---|---|---|
 | `type:kernel` | `chore` | rien | SDK d'infrastructure, NestJS |
 | `type:domain` | `objective`, `chat`, `ai` | `type:kernel` | un autre domaine, l'identité, l'infrastructure, NestJS |
-| `type:identity` | `user`, `auth` | `type:identity`, `type:kernel` | le métier, l'infrastructure, NestJS |
+| `type:identity` | `user`, `auth`, `akari-access` | `type:identity`, `type:kernel` | le métier, l'infrastructure, NestJS |
 | `type:workflow` | `ai-assistant` | `type:domain`, `type:kernel` | l'identité, l'infrastructure, NestJS |
 | `type:infra` | `supabase`, `gemini`, `firebase` | `type:domain`, `type:identity`, `type:workflow`, `type:kernel` | — |
 | `type:app` | `api` | tout | — |
 
 Le métier ne voit jamais la personne ni ses rôles : il ne reçoit que l'id du propriétaire
 ([ADR 0002](./adr/0002-acces-aux-donnees.md)), et les rôles sont vérifiés à l'entrée de l'API
-([ADR 0008](./adr/0008-roles.md)). `auth` dépend de `user`, jamais l'inverse.
+([ADR 0008](./adr/0008-roles.md)). `auth` dépend de `user`, jamais l'inverse ; `akari-access`
+(les droits Akari de chaque rôle) aussi.
 
 Les doublures de test (`@org/<lib>/testing`) ne peuvent être importées que par des tests. Les
 lectures BFF (`@org/<lib>/bff`) ne peuvent être importées que par l'infrastructure qui les
@@ -63,7 +64,10 @@ domaine, rien hors du dossier `bff/` ne les lit.
   un geste nommé (`RenameObjective`, `CompleteTask`…), jamais une modification générique ; il rend
   l'entité créée ou modifiée ([ADR 0006](./adr/0006-commandes-et-bff.md)). Ils rendent un
   `Result<T>` construit par `runWithResult` ; seules les erreurs du domaine listées deviennent
-  des échecs structurés, le reste devient `UNKNOWN_ERROR`.
+  des échecs structurés, le reste devient `UNKNOWN_ERROR`. Les cas d'usage sont **réservés au
+  métier**, aux gestes des personnes qui utilisent Apex : un mécanisme du système qui contrôle ou
+  compte ce qu'elles font (droits, quotas, journal d'usage) n'en a pas. Il expose un service et des
+  ports, et rend ses refus comme des décisions, pas comme des erreurs (`libs/akari-access`).
 - **Lectures BFF** : `libs/<domaine>/src/lib/bff/*.query.ts`, exportées par `src/bff.ts`
   (`@org/<domaine>/bff`). Des ports pour les clients web et mobile, sans cas d'usage ni logique
   métier, implémentés directement par l'infrastructure et exposés sous `/v2/bff` (tag `bff`).
@@ -74,6 +78,11 @@ domaine, rien hors du dossier `bff/` ne les lit.
 - **Rôles** : `Role`, `parseRoles` et `hasAnyRole` dans `libs/user` ; lus par l'adaptateur
   Supabase dans `app_metadata.roles` ; vérifiés par `RolesGuard` sur les routes marquées
   `@Roles([...])` ([ADR 0008](./adr/0008-roles.md)).
+- **Quota d'Akari** : `libs/akari-access`, un service du système (`AkariAccess`) et ses ports
+  (`AkariRuleSource` pour les règles des rôles, `AkariUsageJournal` pour le journal des tours
+  réussis, `Clock`). `AkariAccess.check` décide (`decideAkariAccess`, pure) dans `AkariQuotaGuard`,
+  sur l'envoi d'un message ; `AkariAccess.record` compte un tour, branché sur le rappel
+  `onTurnSucceeded` du workflow, qui ne connaît ni rôles ni quotas.
 - **Adaptateurs** : `libs/supabase`, `libs/gemini`, `libs/firebase`.
 - **Workflow de l'assistant** : `workflows/ai-assistant` ([ADR 0004](./adr/0004-orchestrateur.md),
   [PRD](./features/send-message-to-ai-prd.md)).

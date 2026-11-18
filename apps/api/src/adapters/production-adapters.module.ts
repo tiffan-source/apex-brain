@@ -1,6 +1,14 @@
 import type { DynamicModule, Provider } from '@nestjs/common';
 import { Module } from '@nestjs/common';
 import { InteractiveAIProvider } from '@org/ai';
+import {
+  AkariRuleSource,
+  AkariUsageJournal,
+  Clock,
+  InMemoryAkariRuleSource,
+  InMemoryAkariUsageJournal,
+  SystemClock,
+} from '@org/akari-access';
 import { IWorkflowStateRepository, InMemoryWorkflowStateRepository } from '@org/ai-assistant';
 import { AuthProvider } from '@org/auth';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
@@ -77,6 +85,10 @@ export class ProductionAdaptersModule {
                   }),
                 ),
         },
+        { provide: Clock, useFactory: () => new SystemClock() },
+        // En mémoire jusqu'aux adaptateurs Firestore (issue #13) : le journal est perdu au redémarrage.
+        { provide: AkariRuleSource, useFactory: () => new InMemoryAkariRuleSource() },
+        { provide: AkariUsageJournal, useFactory: () => new InMemoryAkariUsageJournal() },
       ],
       exports: [...PORTS],
     };

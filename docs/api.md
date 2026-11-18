@@ -35,13 +35,15 @@ Toujours sous la forme :
 
 Le **code** est le contrat : le client choisit sa phrase d'après lui. Le **message** est technique
 (en anglais) et ne doit jamais être montré tel quel ; celui d'une panne inattendue est masqué.
-`VALIDATION_ERROR` détaille les champs refusés dans `details: [{ path, message }]`.
+`VALIDATION_ERROR` détaille les champs refusés dans `details: [{ path, message }]`, et
+`AKARI_QUOTA_EXCEEDED` le quota épuisé dans `details: { limit, used, window, resetsAt }` (voir
+[Conversation et assistant](#conversation-et-assistant)).
 
 | Statut | Codes |
 |---|---|
 | 400 | `VALIDATION_ERROR`, `BAD_REQUEST` (JSON illisible), `WEAK_PASSWORD`, `INVALID_EMAIL` |
 | 401 | `UNAUTHENTICATED` (jeton absent ou invalide), `INVALID_CREDENTIALS`, `INVALID_SESSION` |
-| 403 | `EMAIL_NOT_CONFIRMED`, `FORBIDDEN` (aucun rôle de la personne n'ouvre la route) |
+| 403 | `EMAIL_NOT_CONFIRMED`, `FORBIDDEN` (aucun rôle de la personne n'ouvre la route), `AKARI_QUOTA_EXCEEDED` (quota d'Akari épuisé) |
 | 404 | `OBJECTIVE_NOT_FOUND`, `TASK_NOT_FOUND`, `CONVERSATION_NOT_FOUND`, `NOT_FOUND` (route) |
 | 409 | `USER_ALREADY_EXIST`, `WORKFLOW_BUSY`, `NO_PENDING_PERMISSION` |
 | 429 | `TOO_MANY_REQUESTS` |
@@ -141,6 +143,26 @@ Seul un objectif principal a une conversation (une étape, ou un objectif suppri
 `404 CONVERSATION_NOT_FOUND`). L'envoi d'un message répond `403 FORBIDDEN` à un compte sans rôle
 `standard`, `premium` ou `admin` ; la lecture de l'état et la réponse à une demande d'accord restent
 ouvertes, pour qu'un tour déjà lancé puisse finir.
+
+**Quota d'Akari.** Chaque rôle a une règle : une limite de messages (ou illimité) sur une fenêtre.
+Au départ, `standard` a 3 messages au total, `premium` et `admin` sont illimités. Avec plusieurs
+rôles, la règle la plus généreuse l'emporte. Les règles se règlent sans déploiement ; un changement
+vaut dès l'envoi suivant. Seul compte un **tour réussi** : un message auquel Akari a répondu (un
+tour qui a demandé un accord compte une fois, accord donné ou refusé). Un tour en panne
+(`lastError`), un tour abandonné ou un envoi refusé ne comptent pas, et supprimer un objectif ne
+rend pas ses messages. L'envoi répond :
+
+- `403 FORBIDDEN` quand aucun des rôles de la personne n'a de règle ;
+- `403 AKARI_QUOTA_EXCEEDED` quand le quota est épuisé, avec
+  `details: { limit, used, window, resetsAt }` : `window` vaut `total` (`day` et `month` à venir),
+  `resetsAt` est l'instant de remise à zéro, `null` pour `total`.
+
+```json
+{ "error": { "code": "AKARI_QUOTA_EXCEEDED", "message": "…",
+  "details": { "limit": 3, "used": 3, "window": "total", "resetsAt": null } } }
+```
+
+Aucune route ne donne le quota restant. La limitation de débit de l'envoi reste en place, à part.
 `sender` vaut l'id de la personne, ou `AI` pour Akari.
 
 ```text

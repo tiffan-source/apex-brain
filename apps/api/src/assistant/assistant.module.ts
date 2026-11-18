@@ -1,6 +1,7 @@
 import type { OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { Inject, Logger, Module } from '@nestjs/common';
 import { InteractiveAIProvider } from '@org/ai';
+import { AkariAccess, AkariRuleSource, AkariUsageJournal, Clock } from '@org/akari-access';
 import {
   AIService,
   AkariSystemContextProvider,
@@ -20,6 +21,7 @@ import { IdGenerator } from '@org/chore';
 import { ObjectiveInternalService, ObjectiveRepository } from '@org/objective';
 import type { Environment } from '../config/environment';
 import { APP_ENVIRONMENT } from '../config/environment';
+import { AkariQuotaGuard } from './akari-quota.guard';
 import { AssistantController } from './assistant.controller';
 
 /** Toutes les minutes, les workflows au repos depuis trop longtemps quittent la mémoire. */
@@ -29,6 +31,13 @@ const EVICTION_INTERVAL_MS = 60_000;
 @Module({
   controllers: [AssistantController],
   providers: [
+    {
+      provide: AkariAccess,
+      useFactory: (rules: AkariRuleSource, journal: AkariUsageJournal, clock: Clock) =>
+        new AkariAccess(rules, journal, clock),
+      inject: [AkariRuleSource, AkariUsageJournal, Clock],
+    },
+    AkariQuotaGuard,
     {
       provide: ObjectiveInternalService,
       useFactory: (repository: ObjectiveRepository, ids: IdGenerator) =>
@@ -57,6 +66,7 @@ const EVICTION_INTERVAL_MS = 60_000;
         systemContext: SystemContextProvider,
         ids: IdGenerator,
         states: IWorkflowStateRepository,
+        akariAccess: AkariAccess,
       ) => {
         const logger = new Logger('Assistant');
         return new SendMessageToAIWorkflow(
@@ -69,6 +79,9 @@ const EVICTION_INTERVAL_MS = 60_000;
             systemContextProvider: systemContext,
             idGenerator: ids,
             workflowStateRepository: states,
+            // Chaque tour réussi entre au journal d'usage d'Akari, sous l'id de la réponse. Le
+            // workflow n'en sait pas plus : ni rôles, ni quotas (ADR 0004, 0008).
+            onTurnSucceeded: (turn) => akariAccess.record(turn),
           },
           {
             idleTimeoutMs: environment.ASSISTANT_IDLE_TIMEOUT_MINUTES * 60_000,
@@ -93,6 +106,7 @@ const EVICTION_INTERVAL_MS = 60_000;
         SystemContextProvider,
         IdGenerator,
         IWorkflowStateRepository,
+        AkariAccess,
       ],
     },
   ],

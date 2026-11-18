@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
+import type { AkariQuota } from '@org/akari-access';
 import type { ResultError } from '@org/chore';
 import { UNKNOWN_ERROR } from '@org/chore';
 
@@ -9,8 +10,10 @@ export type ApiErrorBody = {
     code: string;
     /** Message technique (en anglais), pour les journaux et le débogage : jamais à afficher tel quel. */
     message: string;
-    /** Le détail des champs refusés (`VALIDATION_ERROR`). */
-    details?: Array<{ path: string; message: string }>;
+    /**
+     * Le détail : les champs refusés (`VALIDATION_ERROR`), le quota épuisé (`AKARI_QUOTA_EXCEEDED`).
+     */
+    details?: Array<{ path: string; message: string }> | Record<string, unknown>;
   };
 };
 
@@ -25,6 +28,7 @@ export const ERROR_STATUS: Readonly<Record<string, HttpStatus>> = {
   INVALID_SESSION: HttpStatus.UNAUTHORIZED,
   EMAIL_NOT_CONFIRMED: HttpStatus.FORBIDDEN,
   FORBIDDEN: HttpStatus.FORBIDDEN,
+  AKARI_QUOTA_EXCEEDED: HttpStatus.FORBIDDEN,
   NOT_FOUND: HttpStatus.NOT_FOUND,
   OBJECTIVE_NOT_FOUND: HttpStatus.NOT_FOUND,
   TASK_NOT_FOUND: HttpStatus.NOT_FOUND,
@@ -48,7 +52,14 @@ export function statusOfCode(code: string): HttpStatus {
  * choisit le statut HTTP.
  */
 export class DomainFailureException extends HttpException {
-  constructor(readonly failure: ResultError) {
+  /**
+   * `details` part dans la réponse, tel quel : à ne donner que pour un code dont le contrat les
+   * décrit (`AKARI_QUOTA_EXCEEDED`). Sans lui, les `metadata` de l'erreur ne sont pas renvoyées.
+   */
+  constructor(
+    readonly failure: ResultError,
+    readonly details?: Record<string, unknown>,
+  ) {
     super(failure.message, statusOfCode(failure.code));
   }
 }
@@ -64,6 +75,22 @@ export function forbidden(): DomainFailureException {
     code: 'FORBIDDEN',
     message: 'None of your roles grants access to this route',
   });
+}
+
+/** La personne a envoyé tous les messages que la règle de ses rôles lui accorde dans la fenêtre. */
+export function akariQuotaExceeded(quota: AkariQuota): DomainFailureException {
+  return new DomainFailureException(
+    {
+      code: 'AKARI_QUOTA_EXCEEDED',
+      message: `Akari message quota exceeded (${quota.used}/${quota.limit}, window ${quota.window})`,
+    },
+    {
+      limit: quota.limit,
+      used: quota.used,
+      window: quota.window,
+      resetsAt: quota.resetsAt?.toISOString() ?? null,
+    },
+  );
 }
 
 /** Le corps, les paramètres ou la requête ne respectent pas le contrat. */
