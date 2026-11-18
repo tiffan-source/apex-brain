@@ -221,6 +221,27 @@ describe("Quota d'Akari (e2e)", () => {
     });
   });
 
+  it('reste fermé, en 500 sans détail, quand les règles ou le journal sont en panne', async () => {
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const alice = person();
+    const objectiveId = await createObjective(alice);
+
+    vi.spyOn(t.akariRules, 'forRoles').mockRejectedValueOnce(new Error('rules unreachable'));
+    const rulesDown = await send(alice, objectiveId);
+
+    vi.spyOn(t.akariJournal, 'countSince').mockRejectedValueOnce(new Error('journal unreachable'));
+    const journalDown = await send(alice, objectiveId);
+
+    for (const response of [rulesDown, journalDown]) {
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual({
+        error: { code: 'UNKNOWN_ERROR', message: 'An unexpected error occurred' },
+      });
+    }
+    expect(t.ai.calls).toHaveLength(0);
+    logged.mockRestore();
+  });
+
   it("enregistre chaque tour réussi sous l'id de la réponse d'Akari", async () => {
     const alice = person();
     const objectiveId = await createObjective(alice);
@@ -228,7 +249,7 @@ describe("Quota d'Akari (e2e)", () => {
     await succeededTurn(alice, objectiveId);
 
     const { lastRegisteredMessage } = await state(alice, objectiveId);
-    expect([...t.akariUsages.usages]).toEqual([
+    expect([...t.akariJournal.usages]).toEqual([
       [lastRegisteredMessage?.id, { ownerId: alice.id, objectiveId, at: t.clock.now() }],
     ]);
   });

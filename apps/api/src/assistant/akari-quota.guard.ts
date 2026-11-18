@@ -1,7 +1,7 @@
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { AKARI_QUOTA_EXCEEDED, AuthorizeAkariMessageUseCase, NO_AKARI_RULE } from '@org/akari-access';
-import { DomainFailureException, forbidden, unauthenticated } from '../http/api-error';
+import { AkariAccess } from '@org/akari-access';
+import { akariQuotaExceeded, forbidden, unauthenticated } from '../http/api-error';
 import type { AuthenticatedRequest } from '../auth/authenticated-request';
 
 /**
@@ -14,25 +14,22 @@ import type { AuthenticatedRequest } from '../auth/authenticated-request';
 export class AkariQuotaGuard implements CanActivate {
   private readonly logger = new Logger('AkariQuota');
 
-  constructor(
-    @Inject(AuthorizeAkariMessageUseCase) private readonly authorize: AuthorizeAkariMessageUseCase,
-  ) {}
+  constructor(@Inject(AkariAccess) private readonly akariAccess: AkariAccess) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const { user } = context.switchToHttp().getRequest<AuthenticatedRequest>();
     if (!user) throw unauthenticated();
 
-    const result = await this.authorize.execute({ ownerId: user.id, roles: user.roles });
-    if (result.success) return true;
+    const decision = await this.akariAccess.check(user);
 
-    const { error } = result;
-    if (error.code === NO_AKARI_RULE) {
-      this.logger.warn(`No Akari rule for user ${user.id} with roles [${user.roles.join(', ')}]`);
-      throw forbidden();
+    switch (decision.type) {
+      case 'allowed':
+        return true;
+      case 'no-rule':
+        this.logger.warn(`No Akari rule for user ${user.id} with roles [${user.roles.join(', ')}]`);
+        throw forbidden();
+      case 'quota-exceeded':
+        throw akariQuotaExceeded(decision.quota);
     }
-    if (error.code === AKARI_QUOTA_EXCEEDED) {
-      throw new DomainFailureException(error, error.metadata);
-    }
-    throw new DomainFailureException(error);
   }
 }

@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
+import type { AkariQuota } from '@org/akari-access';
 import type { ResultError } from '@org/chore';
 import { UNKNOWN_ERROR } from '@org/chore';
 
@@ -74,6 +75,22 @@ export function forbidden(): DomainFailureException {
     code: 'FORBIDDEN',
     message: 'None of your roles grants access to this route',
   });
+}
+
+/** La personne a envoyé tous les messages que la règle de ses rôles lui accorde dans la fenêtre. */
+export function akariQuotaExceeded(quota: AkariQuota): DomainFailureException {
+  return new DomainFailureException(
+    {
+      code: 'AKARI_QUOTA_EXCEEDED',
+      message: `Akari message quota exceeded (${quota.used}/${quota.limit}, window ${quota.window})`,
+    },
+    {
+      limit: quota.limit,
+      used: quota.used,
+      window: quota.window,
+      resetsAt: quota.resetsAt?.toISOString() ?? null,
+    },
+  );
 }
 
 /** Le corps, les paramètres ou la requête ne respectent pas le contrat. */

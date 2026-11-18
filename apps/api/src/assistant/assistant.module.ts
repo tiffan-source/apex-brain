@@ -1,13 +1,7 @@
 import type { OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { Inject, Logger, Module } from '@nestjs/common';
 import { InteractiveAIProvider } from '@org/ai';
-import {
-  AkariRulesQuery,
-  AkariUsageRepository,
-  AuthorizeAkariMessageUseCase,
-  Clock,
-  RecordAkariUsageUseCase,
-} from '@org/akari-access';
+import { AkariAccess, AkariRuleSource, AkariUsageJournal, Clock } from '@org/akari-access';
 import {
   AIService,
   AkariSystemContextProvider,
@@ -38,15 +32,10 @@ const EVICTION_INTERVAL_MS = 60_000;
   controllers: [AssistantController],
   providers: [
     {
-      provide: AuthorizeAkariMessageUseCase,
-      useFactory: (rules: AkariRulesQuery, usages: AkariUsageRepository, clock: Clock) =>
-        new AuthorizeAkariMessageUseCase(rules, usages, clock),
-      inject: [AkariRulesQuery, AkariUsageRepository, Clock],
-    },
-    {
-      provide: RecordAkariUsageUseCase,
-      useFactory: (usages: AkariUsageRepository, clock: Clock) => new RecordAkariUsageUseCase(usages, clock),
-      inject: [AkariUsageRepository, Clock],
+      provide: AkariAccess,
+      useFactory: (rules: AkariRuleSource, journal: AkariUsageJournal, clock: Clock) =>
+        new AkariAccess(rules, journal, clock),
+      inject: [AkariRuleSource, AkariUsageJournal, Clock],
     },
     AkariQuotaGuard,
     {
@@ -77,7 +66,7 @@ const EVICTION_INTERVAL_MS = 60_000;
         systemContext: SystemContextProvider,
         ids: IdGenerator,
         states: IWorkflowStateRepository,
-        recordUsage: RecordAkariUsageUseCase,
+        akariAccess: AkariAccess,
       ) => {
         const logger = new Logger('Assistant');
         return new SendMessageToAIWorkflow(
@@ -92,10 +81,7 @@ const EVICTION_INTERVAL_MS = 60_000;
             workflowStateRepository: states,
             // Chaque tour réussi entre au journal d'usage d'Akari, sous l'id de la réponse. Le
             // workflow n'en sait pas plus : ni rôles, ni quotas (ADR 0004, 0008).
-            onTurnSucceeded: async (turn) => {
-              const recorded = await recordUsage.execute(turn);
-              if (!recorded.success) throw new Error(`${recorded.error.code}: ${recorded.error.message}`);
-            },
+            onTurnSucceeded: (turn) => akariAccess.record(turn),
           },
           {
             idleTimeoutMs: environment.ASSISTANT_IDLE_TIMEOUT_MINUTES * 60_000,
@@ -120,7 +106,7 @@ const EVICTION_INTERVAL_MS = 60_000;
         SystemContextProvider,
         IdGenerator,
         IWorkflowStateRepository,
-        RecordAkariUsageUseCase,
+        AkariAccess,
       ],
     },
   ],

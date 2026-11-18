@@ -1,12 +1,12 @@
 import { Role } from '@org/user';
 import { AkariRule, AkariRules, STARTING_AKARI_RULES } from '../models/akari-rule';
-import { AkariRulesQuery } from '../protocols/akari-rules.query';
+import { AkariRuleSource } from '../protocols/akari-rule-source';
 
 /**
  * Les règles en mémoire, préremplies avec les règles de départ : pour le développement local, les
  * tests, et la production tant que Firestore ne les porte pas (issue #13).
  */
-export class InMemoryAkariRulesQuery extends AkariRulesQuery {
+export class InMemoryAkariRuleSource extends AkariRuleSource {
   private readonly rules = new Map<Role, AkariRule>();
 
   constructor(rules: AkariRules = STARTING_AKARI_RULES) {
@@ -24,7 +24,7 @@ export class InMemoryAkariRulesQuery extends AkariRulesQuery {
     this.rules.delete(role);
   }
 
-  async execute(roles: readonly Role[]): Promise<AkariRules> {
+  async forRoles(roles: readonly Role[]): Promise<AkariRules> {
     const found: AkariRules = {};
     for (const role of roles) {
       const rule = this.rules.get(role);
