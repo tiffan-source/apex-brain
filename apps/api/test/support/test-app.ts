@@ -94,6 +94,8 @@ export async function createTestApp(
    */
   const signIn = (email: string, roles?: readonly Role[]) => {
     const { id, accessToken } = auth.seedAccount(email, 'secret123', { roles });
+    // Le trigger de la base ne crée jamais de compte sans rôle : on les lui retire ensuite.
+    if (roles?.length === 0) auth.setRoles(email, []);
     return { id, accessToken, authorization: `Bearer ${accessToken}` };
   };
 

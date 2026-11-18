@@ -38,8 +38,8 @@ export class InMemoryAuthProvider extends AuthProvider {
   }
 
   /**
-   * Créer un compte directement et rendre son jeton d'accès. Sans `roles`, il reçoit `standard`
-   * comme à l'inscription ; `roles: []` donne un compte dont on a retiré tous les rôles.
+   * Créer un compte directement et rendre son jeton d'accès. Comme le trigger de la base, un
+   * compte créé sans rôle (ou avec `[]`) reçoit `standard` ; pour un compte sans rôle, `setRoles`.
    */
   seedAccount(
     email: string,
@@ -47,7 +47,8 @@ export class InMemoryAuthProvider extends AuthProvider {
     profile: { displayName?: string; roles?: readonly Role[] } = {},
   ): { id: string; accessToken: string } {
     const id = this.nextId('user');
-    const { displayName, roles = DEFAULT_ROLES } = profile;
+    const { displayName } = profile;
+    const roles = profile.roles?.length ? profile.roles : DEFAULT_ROLES;
     this.accounts.set(email, { id, email, password, displayName, roles, confirmed: true });
     return { id, accessToken: this.openSession(this.accounts.get(email) as Account).accessToken };
   }
