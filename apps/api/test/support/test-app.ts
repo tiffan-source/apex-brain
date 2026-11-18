@@ -88,9 +88,14 @@ export async function createTestApp(
 
   const http = () => request(app.getHttpServer());
 
-  /** Créer une personne (avec des rôles, si besoin) et rendre de quoi appeler l'API en son nom. */
-  const signIn = (email: string, roles: readonly Role[] = []) => {
+  /**
+   * Créer une personne et rendre de quoi appeler l'API en son nom. Sans `roles`, elle a `standard`
+   * comme tout nouveau compte ; `[]` donne un compte sans rôle.
+   */
+  const signIn = (email: string, roles?: readonly Role[]) => {
     const { id, accessToken } = auth.seedAccount(email, 'secret123', { roles });
+    // Le trigger de la base ne crée jamais de compte sans rôle : on les lui retire ensuite.
+    if (roles?.length === 0) auth.setRoles(email, []);
     return { id, accessToken, authorization: `Bearer ${accessToken}` };
   };
 

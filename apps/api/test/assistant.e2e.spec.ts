@@ -182,6 +182,63 @@ describe('Conversation et assistant (e2e)', () => {
     expect(recovered.lastError).toBeNull();
   });
 
+  describe("accès à Akari selon les rôles", () => {
+    it('ouvre l’envoi à standard, premium et admin', async () => {
+      for (const roles of [['standard'], ['premium'], ['admin']] as const) {
+        const who = t.signIn(`${roles[0]}@apex.test`, roles);
+        const created = await t
+          .http()
+          .post('/v2/objectives')
+          .set('Authorization', who.authorization)
+          .send({ title: 'Lire' });
+        t.ai.willRespond(t.ai.text('Bonne idée.'));
+
+        const response = await t
+          .http()
+          .post(`/v2/objectives/${created.body.id}/assistant/messages`)
+          .set('Authorization', who.authorization)
+          .send({ message: 'Bonjour' });
+
+        expect(response.status).toBe(202);
+      }
+    });
+
+    it('refuse en 403 FORBIDDEN l’envoi d’un compte sans rôle, sans lancer de tour', async () => {
+      t.auth.setRoles('alice@apex.test', []);
+
+      const response = await send('Bonjour');
+
+      expect(response.status).toBe(403);
+      expect(response.body).toEqual({ error: { code: 'FORBIDDEN', message: expect.any(String) } });
+      await expect(state()).resolves.toMatchObject({ status: 'ready', lastRegisteredMessage: null });
+    });
+
+    it("laisse un compte sans rôle lire l'état et répondre à l'accord d'un tour déjà lancé", async () => {
+      t.ai.willRespond(
+        t.ai.toolCalls({
+          id: 'call-1',
+          name: 'createTask',
+          arguments: { objectiveId, title: 'Courir 5 km', importance: 4, urgency: 2 },
+        }),
+        t.ai.text("C'est ajouté."),
+      );
+      await send('Ajoute un pas');
+      await waitFor('awaiting-permission');
+      t.auth.setRoles('alice@apex.test', []);
+
+      const granted = await t
+        .http()
+        .post(`/v2/objectives/${objectiveId}/assistant/permission`)
+        .set('Authorization', alice.authorization)
+        .send({ granted: true, toolCallId: 'call-1' });
+
+      expect(granted.status).toBe(202);
+      await expect(waitFor('ready')).resolves.toMatchObject({
+        lastRegisteredMessage: expect.objectContaining({ content: "C'est ajouté." }),
+      });
+    });
+  });
+
   it("n'ouvre la conversation et l'assistant qu'à la propriétaire de l'objectif principal", async () => {
     const stage = await t
       .http()

@@ -17,10 +17,13 @@ type Account = {
   confirmed: boolean;
 };
 
+/** Comme le trigger de la base : un compte créé sans rôle reçoit `standard`. */
+const DEFAULT_ROLES: readonly Role[] = ['standard'];
+
 /**
  * Un fournisseur d'identité en mémoire, avec les règles de Supabase utiles aux tests :
  * mot de passe de 6 caractères minimum, jetons de renouvellement à usage unique, déconnexion
- * qui invalide les jetons, confirmation d'e-mail activable.
+ * qui invalide les jetons, confirmation d'e-mail activable, rôle `standard` par défaut.
  */
 export class InMemoryAuthProvider extends AuthProvider {
   readonly accounts = new Map<string, Account>();
@@ -34,16 +37,30 @@ export class InMemoryAuthProvider extends AuthProvider {
     super();
   }
 
-  /** Créer un compte directement (nom d'affichage et rôles, si besoin) et rendre son jeton d'accès. */
+  /**
+   * Créer un compte directement et rendre son jeton d'accès. Comme le trigger de la base, un
+   * compte créé sans rôle (ou avec `[]`) reçoit `standard` ; pour un compte sans rôle, `setRoles`.
+   */
   seedAccount(
     email: string,
     password: string,
     profile: { displayName?: string; roles?: readonly Role[] } = {},
   ): { id: string; accessToken: string } {
     const id = this.nextId('user');
-    const { displayName, roles = [] } = profile;
+    const { displayName } = profile;
+    const roles = profile.roles?.length ? profile.roles : DEFAULT_ROLES;
     this.accounts.set(email, { id, email, password, displayName, roles, confirmed: true });
     return { id, accessToken: this.openSession(this.accounts.get(email) as Account).accessToken };
+  }
+
+  /**
+   * Changer les rôles d'un compte, comme un admin qui réécrit `app_metadata`. Ici, le changement
+   * vaut dès l'appel suivant ; chez Supabase, au prochain renouvellement de session.
+   */
+  setRoles(email: string, roles: readonly Role[]): void {
+    const account = this.accounts.get(email);
+    if (!account) throw new Error(`Aucun compte pour ${email}`);
+    account.roles = roles;
   }
 
   async register(email: string, password: string): Promise<Registration> {
@@ -51,7 +68,7 @@ export class InMemoryAuthProvider extends AuthProvider {
     if (password.length < 6) throw new WeakPasswordError(['length']);
 
     const confirmed = !this.options.requireEmailConfirmation;
-    const account: Account = { id: this.nextId('user'), email, password, roles: [], confirmed };
+    const account: Account = { id: this.nextId('user'), email, password, roles: DEFAULT_ROLES, confirmed };
     this.accounts.set(email, account);
 
     return { user: this.toUser(account), session: confirmed ? this.openSession(account) : null };

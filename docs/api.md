@@ -11,9 +11,10 @@ générer un client typé). Ce document-ci en donne la vue d'ensemble et les rè
   `404 NOT_FOUND` ([ADR 0007](./adr/0007-retrait-de-la-v1.md)).
 - **Authentification** : `Authorization: Bearer <accessToken>` sur toute route sauf
   `/v2/auth/register`, `/v2/auth/login`, `/v2/auth/refresh` et `/health`.
-- **Rôles** : une personne a des rôles (`admin`, `premium`), aucun pour un compte de base. Une
-  route réservée répond `403 FORBIDDEN` à une personne connectée dont aucun rôle ne l'ouvre ; aucune
-  route n'est réservée pour l'instant ([ADR 0008](./adr/0008-roles.md)).
+- **Rôles** : une personne a des rôles (`standard`, `premium`, `admin`) ; tout nouveau compte
+  reçoit `standard`, et un compte sans rôle n'a accès à rien. Une route réservée répond
+  `403 FORBIDDEN` à une personne connectée dont aucun rôle ne l'ouvre ; seul l'envoi d'un message à
+  Akari l'est pour l'instant ([ADR 0008](./adr/0008-roles.md)).
 - **Corps** : JSON. Les dates en entrée acceptent `2027-04-01` ou un instant ISO 8601 ; en sortie,
   ce sont des instants ISO 8601 (`2027-04-01T00:00:00.000Z`).
 - **Réponses** : le corps d'une réponse réussie est la sortie du cas d'usage, telle quelle (mêmes
@@ -57,7 +58,7 @@ Le **code** est le contrat : le client choisit sa phrase d'après lui. Le **mess
 | `GET /v2/auth/me` | `GetCurrentUserUseCase` | — | `200 { id, name, email, roles }` |
 
 `user` vaut `{ id, name, email, roles }` (`name` : le nom d'affichage, à défaut l'e-mail ;
-`roles` : `admin`, `premium`, vide pour un compte de base, lus dans le jeton : un rôle donné compte
+`roles` : `standard`, `premium`, `admin`, au moins `standard` pour un nouveau compte, lus dans le jeton : un rôle donné compte
 au prochain renouvellement) ; `session` vaut `{ accessToken, refreshToken, expiresAt }`. `session` est `null` à l'inscription tant que
 l'e-mail doit être confirmé. Le client renouvelle la session avant `expiresAt` ou sur un `401`.
 
@@ -133,11 +134,13 @@ l'infrastructure implémente directement.
 |---|---|---|---|
 | `GET /v2/objectives/{objectiveId}/conversation` | `GetConversationsQuery` | — | `200 { id, messages: [{ id, sender, content, createdAt }] }` |
 | `GET /v2/objectives/{objectiveId}/assistant` | `startWorkFlow` + `getState` | — | `200 WorkflowState` |
-| `POST /v2/objectives/{objectiveId}/assistant/messages` | `sendMessage` | `{ message }` | `202 WorkflowState` |
+| `POST /v2/objectives/{objectiveId}/assistant/messages` | `sendMessage` (rôles `standard`, `premium`, `admin`) | `{ message }` | `202 WorkflowState` |
 | `POST /v2/objectives/{objectiveId}/assistant/permission` | `respondToPermission` | `{ granted, toolCallId? }` | `202 WorkflowState` |
 
 Seul un objectif principal a une conversation (une étape, ou un objectif supprimé, répond
-`404 CONVERSATION_NOT_FOUND`).
+`404 CONVERSATION_NOT_FOUND`). L'envoi d'un message répond `403 FORBIDDEN` à un compte sans rôle
+`standard`, `premium` ou `admin` ; la lecture de l'état et la réponse à une demande d'accord restent
+ouvertes, pour qu'un tour déjà lancé puisse finir.
 `sender` vaut l'id de la personne, ou `AI` pour Akari.
 
 ```text

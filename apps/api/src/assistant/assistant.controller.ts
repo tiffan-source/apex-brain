@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post } from
 import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SendMessageToAIWorkflow } from '@org/ai-assistant';
 import type { AuthenticatedUserOutput } from '@org/auth';
-import { CurrentUser } from '../auth/auth.decorators';
+import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { openApiErrorSchema, openApiSchema } from '../http/openapi';
 import { unwrap } from '../http/result';
 import { idSchema } from '../http/schemas';
@@ -30,11 +30,16 @@ export class AssistantController {
     return unwrap(await this.workflow.getState(objectiveId, user.id));
   }
 
-  /** sendMessage : le tour démarre, la réponse arrive par l'état. */
+  /**
+   * sendMessage : le tour démarre, la réponse arrive par l'état. Réservé aux rôles connus : un
+   * compte sans rôle n'a pas accès à Akari (docs/adr/0008-roles.md).
+   */
   @Post('messages')
+  @Roles(['standard', 'premium', 'admin'])
   @RateLimit('assistant-message')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiResponse({ status: 202, schema: openApiSchema(workflowStateResponseSchema) })
+  @ApiResponse({ status: 403, description: 'FORBIDDEN', schema: openApiErrorSchema() })
   @ApiResponse({ status: 404, description: 'CONVERSATION_NOT_FOUND', schema: openApiErrorSchema() })
   @ApiResponse({ status: 409, description: 'WORKFLOW_BUSY', schema: openApiErrorSchema() })
   async sendMessage(
