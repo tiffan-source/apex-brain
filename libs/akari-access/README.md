@@ -6,7 +6,7 @@ journal des tours réussis, et la décision « peut-elle écrire à Akari ? ». 
 rien, il signale seulement ses tours réussis.
 
 Un mécanisme du système, pas du métier : la lib n'a pas de cas d'usage (ni `usecases/`, ni
-`Result`). Les cas d'usage sont réservés aux gestes des personnes dans les domaines.
+`Result`). Les cas d'usage sont réservés au métier, aux gestes des personnes qui utilisent Apex.
 
 - `AkariAccess` : `check` avant un envoi (la décision : autorisé, aucune règle, quota épuisé),
   `record` à la fin d'un tour réussi.
