@@ -1,6 +1,7 @@
 import { WORKFLOW_ACTIVITY_STEPS } from '@org/ai-assistant';
+import { AKARI_WINDOWS } from '@org/akari-access';
 import { z } from 'zod';
-import { dateOutputSchema } from '../http/schemas';
+import { apiErrorSchema, dateOutputSchema } from '../http/schemas';
 
 export const sendMessageSchema = z.object({
   message: z.string().trim().min(1).max(4000),
@@ -59,3 +60,23 @@ export const workflowStateResponseSchema = z.object({
     })
     .nullable(),
 });
+
+/** Le quota d'Akari épuisé : la limite, ce qui est déjà compté, la fenêtre, sa remise à zéro. */
+export const akariQuotaExceededDetailsSchema = z.object({
+  limit: z.number().int().nonnegative(),
+  used: z.number().int().nonnegative(),
+  window: z.enum(AKARI_WINDOWS),
+  /** `null` pour la fenêtre `total`, qui ne se remet jamais à zéro. */
+  resetsAt: dateOutputSchema.nullable(),
+});
+
+export const akariQuotaExceededErrorSchema = z.object({
+  error: z.object({
+    code: z.literal('AKARI_QUOTA_EXCEEDED'),
+    message: z.string(),
+    details: akariQuotaExceededDetailsSchema,
+  }),
+});
+
+/** Les 403 de l'envoi d'un message : `FORBIDDEN`, ou `AKARI_QUOTA_EXCEEDED` avec ses détails. */
+export const sendMessageForbiddenSchema = z.union([akariQuotaExceededErrorSchema, apiErrorSchema]);

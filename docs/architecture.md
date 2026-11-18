@@ -43,14 +43,15 @@ l'application NestJS `apps/api`.
 |---|---|---|---|
 | `type:kernel` | `chore` | rien | SDK d'infrastructure, NestJS |
 | `type:domain` | `objective`, `chat`, `ai` | `type:kernel` | un autre domaine, l'identité, l'infrastructure, NestJS |
-| `type:identity` | `user`, `auth` | `type:identity`, `type:kernel` | le métier, l'infrastructure, NestJS |
+| `type:identity` | `user`, `auth`, `akari-access` | `type:identity`, `type:kernel` | le métier, l'infrastructure, NestJS |
 | `type:workflow` | `ai-assistant` | `type:domain`, `type:kernel` | l'identité, l'infrastructure, NestJS |
 | `type:infra` | `supabase`, `gemini`, `firebase` | `type:domain`, `type:identity`, `type:workflow`, `type:kernel` | — |
 | `type:app` | `api` | tout | — |
 
 Le métier ne voit jamais la personne ni ses rôles : il ne reçoit que l'id du propriétaire
 ([ADR 0002](./adr/0002-acces-aux-donnees.md)), et les rôles sont vérifiés à l'entrée de l'API
-([ADR 0008](./adr/0008-roles.md)). `auth` dépend de `user`, jamais l'inverse.
+([ADR 0008](./adr/0008-roles.md)). `auth` dépend de `user`, jamais l'inverse ; `akari-access`
+(les droits Akari de chaque rôle) aussi.
 
 Les doublures de test (`@org/<lib>/testing`) ne peuvent être importées que par des tests. Les
 lectures BFF (`@org/<lib>/bff`) ne peuvent être importées que par l'infrastructure qui les
@@ -74,6 +75,9 @@ domaine, rien hors du dossier `bff/` ne les lit.
 - **Rôles** : `Role`, `parseRoles` et `hasAnyRole` dans `libs/user` ; lus par l'adaptateur
   Supabase dans `app_metadata.roles` ; vérifiés par `RolesGuard` sur les routes marquées
   `@Roles([...])` ([ADR 0008](./adr/0008-roles.md)).
+- **Quota d'Akari** : `libs/akari-access` (règle par rôle, journal des tours réussis, décision
+  pure) ; vérifié par `AkariQuotaGuard` sur l'envoi d'un message, compté par le rappel
+  `onTurnSucceeded` du workflow, qui ne connaît ni rôles ni quotas.
 - **Adaptateurs** : `libs/supabase`, `libs/gemini`, `libs/firebase`.
 - **Workflow de l'assistant** : `workflows/ai-assistant` ([ADR 0004](./adr/0004-orchestrateur.md),
   [PRD](./features/send-message-to-ai-prd.md)).

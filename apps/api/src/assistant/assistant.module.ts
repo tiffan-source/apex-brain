@@ -2,6 +2,13 @@ import type { OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { Inject, Logger, Module } from '@nestjs/common';
 import { InteractiveAIProvider } from '@org/ai';
 import {
+  AkariRulesQuery,
+  AkariUsageRepository,
+  AuthorizeAkariMessageUseCase,
+  Clock,
+  RecordAkariUsageUseCase,
+} from '@org/akari-access';
+import {
   AIService,
   AkariSystemContextProvider,
   ChatService,
@@ -20,6 +27,7 @@ import { IdGenerator } from '@org/chore';
 import { ObjectiveInternalService, ObjectiveRepository } from '@org/objective';
 import type { Environment } from '../config/environment';
 import { APP_ENVIRONMENT } from '../config/environment';
+import { AkariQuotaGuard } from './akari-quota.guard';
 import { AssistantController } from './assistant.controller';
 
 /** Toutes les minutes, les workflows au repos depuis trop longtemps quittent la mémoire. */
@@ -29,6 +37,18 @@ const EVICTION_INTERVAL_MS = 60_000;
 @Module({
   controllers: [AssistantController],
   providers: [
+    {
+      provide: AuthorizeAkariMessageUseCase,
+      useFactory: (rules: AkariRulesQuery, usages: AkariUsageRepository, clock: Clock) =>
+        new AuthorizeAkariMessageUseCase(rules, usages, clock),
+      inject: [AkariRulesQuery, AkariUsageRepository, Clock],
+    },
+    {
+      provide: RecordAkariUsageUseCase,
+      useFactory: (usages: AkariUsageRepository, clock: Clock) => new RecordAkariUsageUseCase(usages, clock),
+      inject: [AkariUsageRepository, Clock],
+    },
+    AkariQuotaGuard,
     {
       provide: ObjectiveInternalService,
       useFactory: (repository: ObjectiveRepository, ids: IdGenerator) =>
@@ -57,6 +77,7 @@ const EVICTION_INTERVAL_MS = 60_000;
         systemContext: SystemContextProvider,
         ids: IdGenerator,
         states: IWorkflowStateRepository,
+        recordUsage: RecordAkariUsageUseCase,
       ) => {
         const logger = new Logger('Assistant');
         return new SendMessageToAIWorkflow(
@@ -69,6 +90,12 @@ const EVICTION_INTERVAL_MS = 60_000;
             systemContextProvider: systemContext,
             idGenerator: ids,
             workflowStateRepository: states,
+            // Chaque tour réussi entre au journal d'usage d'Akari, sous l'id de la réponse. Le
+            // workflow n'en sait pas plus : ni rôles, ni quotas (ADR 0004, 0008).
+            onTurnSucceeded: async (turn) => {
+              const recorded = await recordUsage.execute(turn);
+              if (!recorded.success) throw new Error(`${recorded.error.code}: ${recorded.error.message}`);
+            },
           },
           {
             idleTimeoutMs: environment.ASSISTANT_IDLE_TIMEOUT_MINUTES * 60_000,
@@ -93,6 +120,7 @@ const EVICTION_INTERVAL_MS = 60_000;
         SystemContextProvider,
         IdGenerator,
         IWorkflowStateRepository,
+        RecordAkariUsageUseCase,
       ],
     },
   ],

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SendMessageToAIWorkflow } from '@org/ai-assistant';
 import type { AuthenticatedUserOutput } from '@org/auth';
@@ -7,8 +7,14 @@ import { openApiErrorSchema, openApiSchema } from '../http/openapi';
 import { unwrap } from '../http/result';
 import { idSchema } from '../http/schemas';
 import { RateLimit } from '../rate-limit/rate-limit';
+import { AkariQuotaGuard } from './akari-quota.guard';
 import type { PermissionBody, SendMessageBody } from './assistant.schemas';
-import { permissionSchema, sendMessageSchema, workflowStateResponseSchema } from './assistant.schemas';
+import {
+  permissionSchema,
+  sendMessageForbiddenSchema,
+  sendMessageSchema,
+  workflowStateResponseSchema,
+} from './assistant.schemas';
 
 @ApiTags('assistant')
 @ApiBearerAuth()
@@ -32,14 +38,22 @@ export class AssistantController {
 
   /**
    * sendMessage : le tour démarre, la réponse arrive par l'état. Réservé aux rôles connus : un
-   * compte sans rôle n'a pas accès à Akari (docs/adr/0008-roles.md).
+   * compte sans rôle n'a pas accès à Akari (docs/adr/0008-roles.md). Puis le quota : la règle de
+   * ses rôles, et les tours réussis déjà comptés.
    */
   @Post('messages')
   @Roles(['standard', 'premium', 'admin'])
+  @UseGuards(AkariQuotaGuard)
   @RateLimit('assistant-message')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiResponse({ status: 202, schema: openApiSchema(workflowStateResponseSchema) })
-  @ApiResponse({ status: 403, description: 'FORBIDDEN', schema: openApiErrorSchema() })
+  @ApiResponse({
+    status: 403,
+    description:
+      'FORBIDDEN (aucun rôle ouvrant la route, ou aucune règle Akari pour ses rôles), ' +
+      'AKARI_QUOTA_EXCEEDED (quota épuisé : `details` = `{ limit, used, window, resetsAt }`)',
+    schema: openApiSchema(sendMessageForbiddenSchema),
+  })
   @ApiResponse({ status: 404, description: 'CONVERSATION_NOT_FOUND', schema: openApiErrorSchema() })
   @ApiResponse({ status: 409, description: 'WORKFLOW_BUSY', schema: openApiErrorSchema() })
   async sendMessage(

@@ -70,8 +70,8 @@ export class SendMessageToAIWorkflow {
     private readonly deps: SendMessageToAIWorkflowDependencies,
     private readonly options: SendMessageToAIWorkflowOptions = {},
   ) {
-    this.machine = getMachine(deps);
     this.logger = options.logger ?? consoleLogger;
+    this.machine = getMachine({ ...deps, onTurnSucceeded: this.reportTurnSucceeded(deps.onTurnSucceeded) });
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   }
 
@@ -380,6 +380,23 @@ export class SendMessageToAIWorkflow {
       },
       this.deps.now?.() ?? new Date(),
     );
+  }
+
+  /**
+   * Un abonné en panne ne fait pas échouer le tour : la réponse d'Akari est déjà écrite et la personne
+   * l'a. La panne est journalisée.
+   */
+  private reportTurnSucceeded(
+    onTurnSucceeded: MachineDependencies['onTurnSucceeded'],
+  ): MachineDependencies['onTurnSucceeded'] {
+    if (!onTurnSucceeded) return undefined;
+    return async (turn) => {
+      try {
+        await onTurnSucceeded(turn);
+      } catch (error) {
+        this.logger.error(`Workflow ${turn.objectiveId}: the succeeded turn could not be reported`, error);
+      }
+    };
   }
 
   private actorOptions() {

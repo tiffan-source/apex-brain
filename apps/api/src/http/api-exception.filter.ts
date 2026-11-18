@@ -51,7 +51,8 @@ export class ApiExceptionFilter implements ExceptionFilter {
           body: { error: { code, message: code === UNKNOWN_ERROR ? GENERIC_MESSAGE : message } },
         };
       }
-      return { status, body: { error: { code, message } } };
+      const { details } = exception;
+      return { status, body: { error: { code, message, ...(details ? { details } : {}) } } };
     }
 
     if (exception instanceof RequestValidationException) {

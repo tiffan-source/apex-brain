@@ -3,6 +3,12 @@ import { Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { InteractiveAIProvider } from '@org/ai';
 import { ScriptedAIProvider } from '@org/ai/testing';
+import { AkariRulesQuery, AkariUsageRepository, Clock } from '@org/akari-access';
+import {
+  ControllableClock,
+  InMemoryAkariRulesQuery,
+  InMemoryAkariUsageRepository,
+} from '@org/akari-access/testing';
 import { InMemoryWorkflowStateRepository, IWorkflowStateRepository } from '@org/ai-assistant';
 import { AuthProvider } from '@org/auth';
 import { InMemoryAuthProvider } from '@org/auth/testing';
@@ -52,6 +58,9 @@ export async function createTestApp(
   const auth = new InMemoryAuthProvider();
   const ai = new ScriptedAIProvider();
   const workflowStates = new InMemoryWorkflowStateRepository();
+  const akariRules = new InMemoryAkariRulesQuery();
+  const akariUsages = new InMemoryAkariUsageRepository();
+  const clock = new ControllableClock();
 
   // Comme le trigger de la base : chaque objectif principal reçoit sa conversation.
   objectives.db.onObjectiveCreated((row) => {
@@ -73,6 +82,9 @@ export async function createTestApp(
       { provide: AddMessageCommand, useValue: chat.addMessageCommand },
       { provide: InteractiveAIProvider, useValue: ai },
       { provide: IWorkflowStateRepository, useValue: workflowStates },
+      { provide: AkariRulesQuery, useValue: akariRules },
+      { provide: AkariUsageRepository, useValue: akariUsages },
+      { provide: Clock, useValue: clock },
     ],
     exports: [...PORTS],
   };
@@ -99,7 +111,20 @@ export async function createTestApp(
     return { id, accessToken, authorization: `Bearer ${accessToken}` };
   };
 
-  return { app, http, signIn, objectives, chat, auth, ai, workflowStates, close: () => app.close() };
+  return {
+    app,
+    http,
+    signIn,
+    objectives,
+    chat,
+    auth,
+    ai,
+    workflowStates,
+    akariRules,
+    akariUsages,
+    clock,
+    close: () => app.close(),
+  };
 }
 
 export type TestApp = Awaited<ReturnType<typeof createTestApp>>;
