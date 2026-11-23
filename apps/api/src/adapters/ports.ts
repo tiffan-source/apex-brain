@@ -3,6 +3,7 @@ import { AkariRuleSource, AkariUsageJournal, Clock } from '@org/akari-access';
 import { AuthProvider } from '@org/auth';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { IdGenerator } from '@org/chore';
+import { EventBus } from '@org/event-bus';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import { WorkflowStateStore } from '@org/workflow-runtime';
@@ -22,6 +23,7 @@ export const PORTS = [
   AddMessageCommand,
   InteractiveAIProvider,
   WorkflowStateStore,
+  EventBus,
   AkariRuleSource,
   AkariUsageJournal,
   Clock,

@@ -16,6 +16,7 @@ l'application NestJS `apps/api`.
 │   contrôleurs ── schémas zod (contrat HTTP) ── gardes ── filtre      │
 │   gardes : AuthGuard (qui est-ce ?), puis RolesGuard (@Roles)        │
 │   modules métier : assemblent cas d'usage et workflow sur les ports  │
+│   abonnés du bus : réagissent aux faits annoncés par les workflows   │
 │   ProductionAdaptersModule : branche chaque port sur son adaptateur  │
 └──────────────────────────────────────────────────────────────────────┘
      │ connexion, rôles    │ cas d'usage, queries   │ workflow
@@ -44,7 +45,7 @@ l'application NestJS `apps/api`.
 | `type:kernel` | `chore` | rien | SDK d'infrastructure, NestJS |
 | `type:domain` | `objective`, `chat`, `ai` | `type:kernel` | un autre domaine, l'identité, l'infrastructure, NestJS |
 | `type:identity` | `user`, `auth`, `akari-access` | `type:identity`, `type:kernel` | le métier, l'infrastructure, NestJS |
-| `type:runtime` | `workflow-runtime` | `type:runtime`, `type:kernel` | le métier, l'identité, l'infrastructure, NestJS |
+| `type:runtime` | `workflow-runtime`, `event-bus` | `type:runtime`, `type:kernel` | le métier, l'identité, l'infrastructure, NestJS |
 | `type:workflow` | `ai-assistant` | `type:domain`, `type:runtime`, `type:kernel` | l'identité, l'infrastructure, NestJS |
 | `type:infra` | `supabase`, `gemini`, `firebase` | `type:domain`, `type:identity`, `type:workflow`, `type:runtime`, `type:kernel` | — |
 | `type:app` | `api` | tout | — |
@@ -82,8 +83,8 @@ domaine, rien hors du dossier `bff/` ne les lit.
 - **Quota d'Akari** : `libs/akari-access`, un service du système (`AkariAccess`) et ses ports
   (`AkariRuleSource` pour les règles des rôles, `AkariUsageJournal` pour le journal des tours
   réussis, `Clock`). `AkariAccess.check` décide (`decideAkariAccess`, pure) dans `AkariQuotaGuard`,
-  sur l'envoi d'un message ; `AkariAccess.record` compte un tour, branché sur le rappel
-  `onTurnSucceeded` du workflow, qui ne connaît ni rôles ni quotas.
+  sur l'envoi d'un message ; `AkariAccess.record` compte un tour, abonné du bus à
+  `ai-assistant.turn.succeeded` (`AssistantSubscribers`). Le workflow ne connaît ni rôles ni quotas.
 - **Adaptateurs** : `libs/supabase`, `libs/gemini`, `libs/firebase`.
 - **Workflow de l'assistant** : `workflows/ai-assistant` ([ADR 0004](./adr/0004-orchestrateur.md),
   [PRD](./features/send-message-to-ai-prd.md)) : la machine, ses ports, et les règles d'une requête
@@ -91,7 +92,15 @@ domaine, rien hors du dossier `bff/` ne les lit.
 - **Runtime des workflows** : `workflows/runtime` ([ADR 0010](./adr/0010-runtime-des-workflows-et-bus-d-evenements.md)).
   Il héberge les instances d'un workflow, une par clé (l'objectif) : création ou restauration,
   sauvegarde ordonnée de chaque transition par le port `WorkflowStateStore` (Firestore,
-  `libs/firebase`), éviction des instances au repos, arrêt, oubli.
+  `libs/firebase`), éviction des instances au repos, arrêt, oubli. Il est le seul à écouter les faits
+  que la machine annonce (`emit`) : il les enveloppe et les publie dans le bus, après avoir sauvegardé
+  l'état qui les a produits.
+- **Bus d'événements** : `libs/event-bus`, le port `EventBus` et sa version en mémoire. Un fait porte
+  son type (`ai-assistant.turn.succeeded`), sa source, sa clé, son propriétaire, son `audience`
+  (`public`, vers le client de la personne ; `internal`, jamais hors du serveur) et sa charge. Les
+  réactions de l'API sont des abonnés (`apps/api/src/assistant/assistant.subscribers.ts` : le
+  comptage d'usage d'Akari, la journalisation des pannes de tour). Au plus une fois : un fait peut se
+  perdre si le serveur tombe entre la sauvegarde et la publication.
 - **Racine de composition** : `apps/api/src/adapters/production-adapters.module.ts` (ports →
   adaptateurs) et `apps/api/src/<contexte>/<contexte>.module.ts` (cas d'usage ← ports).
 - **Contrat HTTP** : `apps/api/src/<contexte>/*.schemas.ts` (zod) ; les mêmes schémas valident

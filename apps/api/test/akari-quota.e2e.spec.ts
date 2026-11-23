@@ -1,7 +1,10 @@
 import { Logger } from '@nestjs/common';
 import { AIProviderError } from '@org/ai';
 import type { Role } from '@org/user';
-import { akariQuotaExceededErrorSchema, workflowStateResponseSchema } from '../src/assistant/assistant.schemas';
+import {
+  akariQuotaExceededErrorSchema,
+  workflowStateResponseSchema,
+} from '../src/assistant/assistant.schemas';
 import type { TestApp } from './support/test-app';
 import { createTestApp } from './support/test-app';
 
@@ -45,10 +48,14 @@ describe("Quota d'Akari (e2e)", () => {
     return workflowStateResponseSchema.parse(response.body);
   };
 
+  /** Attendre ce statut, puis que les abonnés du bus aient réagi au tour (le comptage le suit). */
   const waitFor = async (who: Person, objectiveId: string, status: 'ready' | 'awaiting-permission') => {
     for (let attempt = 0; attempt < 200; attempt++) {
       const current = await state(who, objectiveId);
-      if (current.status === status) return current;
+      if (current.status === status) {
+        await t.settle();
+        return current;
+      }
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     throw new Error(`statut « ${status} » jamais atteint`);
@@ -139,7 +146,7 @@ describe("Quota d'Akari (e2e)", () => {
     warned.mockRestore();
   });
 
-  it("ne compte ni un tour en panne, ni un tour abandonné", async () => {
+  it('ne compte ni un tour en panne, ni un tour abandonné', async () => {
     const alice = person();
     const objectiveId = await createObjective(alice);
 
@@ -177,7 +184,10 @@ describe("Quota d'Akari (e2e)", () => {
     const first = await createObjective(alice);
     for (let turn = 0; turn < 3; turn++) await succeededTurn(alice, first);
 
-    const deleted = await t.http().delete(`/v2/objectives/${first}`).set('Authorization', alice.authorization);
+    const deleted = await t
+      .http()
+      .delete(`/v2/objectives/${first}`)
+      .set('Authorization', alice.authorization);
     expect(deleted.status).toBeLessThan(300);
 
     await expectQuotaExceeded(alice, await createObjective(alice), 3);

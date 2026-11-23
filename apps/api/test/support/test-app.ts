@@ -4,24 +4,33 @@ import { Test } from '@nestjs/testing';
 import { InteractiveAIProvider } from '@org/ai';
 import { ScriptedAIProvider } from '@org/ai/testing';
 import { AkariRuleSource, AkariUsageJournal, Clock } from '@org/akari-access';
-import { ControllableClock, InMemoryAkariRuleSource, InMemoryAkariUsageJournal } from '@org/akari-access/testing';
+import {
+  ControllableClock,
+  InMemoryAkariRuleSource,
+  InMemoryAkariUsageJournal,
+} from '@org/akari-access/testing';
+import type { ConversationMachine } from '@org/ai-assistant';
 import { AuthProvider } from '@org/auth';
 import { InMemoryAuthProvider } from '@org/auth/testing';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { createInMemoryChatInfrastructure } from '@org/chat/testing';
 import { IdGenerator } from '@org/chore';
+import { EventBus, InMemoryEventBus } from '@org/event-bus';
 import { SequentialIdGenerator } from '@org/chore/testing';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import { createInMemoryObjectiveInfrastructure } from '@org/objective/testing';
 import type { Role } from '@org/user';
+import type { WorkflowRuntime } from '@org/workflow-runtime';
 import { InMemoryWorkflowStateStore, WorkflowStateStore } from '@org/workflow-runtime';
 import request from 'supertest';
 import { PORTS } from '../../src/adapters/ports';
 import { AppModule } from '../../src/app.module';
+import { ASSISTANT_RUNTIME } from '../../src/assistant/assistant.module';
 import type { Environment } from '../../src/config/environment';
 import { loadEnvironment } from '../../src/config/environment';
 import { configureApp } from '../../src/configure-app';
+import { eventBusLogger } from '../../src/events/event-bus.logger';
 
 export const TEST_ENVIRONMENT = {
   NODE_ENV: 'test',
@@ -57,6 +66,7 @@ export async function createTestApp(
   const akariRules = new InMemoryAkariRuleSource();
   const akariJournal = new InMemoryAkariUsageJournal();
   const clock = new ControllableClock();
+  const bus = new InMemoryEventBus(eventBusLogger);
 
   // Comme le trigger de la base : chaque objectif principal reçoit sa conversation.
   objectives.db.onObjectiveCreated((row) => {
@@ -81,6 +91,7 @@ export async function createTestApp(
       { provide: AkariRuleSource, useValue: akariRules },
       { provide: AkariUsageJournal, useValue: akariJournal },
       { provide: Clock, useValue: clock },
+      { provide: EventBus, useValue: bus },
     ],
     exports: [...PORTS],
   };
@@ -95,6 +106,15 @@ export async function createTestApp(
   await app.init();
 
   const http = () => request(app.getHttpServer());
+
+  /**
+   * Attendre que l'assistant ait sauvegardé et publié ses transitions, et que les abonnés du bus aient
+   * réagi : le comptage d'un tour réussi suit sa fin d'une fraction de seconde (docs/adr/0010).
+   */
+  const settle = async () => {
+    await app.get<WorkflowRuntime<ConversationMachine>>(ASSISTANT_RUNTIME).idle();
+    await bus.idle();
+  };
 
   /**
    * Créer une personne et rendre de quoi appeler l'API en son nom. Sans `roles`, elle a `standard`
@@ -119,6 +139,8 @@ export async function createTestApp(
     akariRules,
     akariJournal,
     clock,
+    bus,
+    settle,
     close: () => app.close(),
   };
 }

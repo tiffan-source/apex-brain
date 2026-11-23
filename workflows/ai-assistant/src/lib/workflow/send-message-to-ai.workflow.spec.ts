@@ -541,6 +541,126 @@ describe('SendMessageToAIWorkflow', () => {
     });
   });
 
+  describe('les annonces', () => {
+    const announced = (harness: ReturnType<typeof createWorkflowHarness>) =>
+      harness.events.map(({ type, key, ownerId, audience, payload }) => ({
+        type,
+        key,
+        ownerId,
+        audience,
+        payload,
+      }));
+
+    it("annonce un tour réussi sous l'id de la réponse, une fois son état sauvegardé", async () => {
+      const harness = createWorkflowHarness();
+      const { workflow, ai, bus, workflowStates } = harness;
+      const storedWhenPublished: unknown[] = [];
+      bus.subscribe('ai-assistant.turn.succeeded', async () => {
+        storedWhenPublished.push((await workflowStates.findById('o1'))?.value);
+      });
+      ai.willRespond(ai.text('Bonjour !'));
+
+      await workflow.sendMessage('o1', 'alice', 'Salut');
+      const done = await waitForStatus(workflow, 'ready');
+      await harness.settle();
+
+      expect(announced(harness)).toEqual([
+        {
+          type: 'ai-assistant.turn.succeeded',
+          key: 'o1',
+          ownerId: 'alice',
+          audience: 'public',
+          payload: { replyMessageId: done.lastRegisteredMessage?.id },
+        },
+      ]);
+      expect(storedWhenPublished).toEqual([WORKFLOW_READY_FOR_NEW_MESSAGE]);
+    });
+
+    it('annonce une panne en interne, avec son code, son étape et son message technique', async () => {
+      const harness = createWorkflowHarness();
+      harness.ai.willRespond(new AIProviderError('quota exceeded'));
+
+      await harness.workflow.sendMessage('o1', 'alice', 'Tu es là ?');
+      const failed = await waitForStatus(harness.workflow, 'ready');
+      await harness.settle();
+
+      expect(announced(harness)).toEqual([
+        {
+          type: 'ai-assistant.turn.failed',
+          key: 'o1',
+          ownerId: 'alice',
+          audience: 'internal',
+          payload: {
+            code: 'AI_PROVIDER_FAILURE',
+            step: 'SendingPromptToAI',
+            message: expect.stringContaining('quota exceeded'),
+            at: failed.lastError?.at,
+          },
+        },
+      ]);
+    });
+
+    it("n'annonce rien tant que le tour attend un accord, puis une seule réussite", async () => {
+      const harness = createWorkflowHarness();
+      const { workflow, ai } = harness;
+      ai.willRespond(
+        ai.toolCalls({
+          id: 'call-1',
+          name: 'createTask',
+          arguments: { objectiveId: 'o1', title: 'Courir 5 km', importance: 4, urgency: 2 },
+        }),
+        ai.text('Ajouté.'),
+      );
+
+      await workflow.sendMessage('o1', 'alice', 'Ajoute un pas');
+      await waitForStatus(workflow, 'awaiting-permission');
+      await harness.settle();
+      expect(harness.events).toEqual([]);
+
+      await workflow.respondToPermission('o1', 'alice', true);
+      await waitForStatus(workflow, 'ready');
+      await harness.settle();
+      expect(announced(harness).map(({ type }) => type)).toEqual(['ai-assistant.turn.succeeded']);
+    });
+
+    it("annonce de nouveau, sous le même id, une réponse dont l'enregistrement est rejoué", async () => {
+      const harness = createWorkflowHarness();
+      const { workflow, ai, chat } = harness;
+      ai.willRespond(ai.text('Bien reçu.'));
+
+      // La réponse d'Akari est écrite en base, mais le serveur s'arrête avant d'en recevoir la confirmation.
+      const original = chat.addMessageCommand.execute.bind(chat.addMessageCommand);
+      let interrupt = true;
+      vi.spyOn(chat.addMessageCommand, 'execute').mockImplementation(async (input) => {
+        const saved = await original(input);
+        if (interrupt && input.userId === AI_SENDER_ID) {
+          interrupt = false;
+          return new Promise(() => undefined);
+        }
+        return saved;
+      });
+
+      await workflow.sendMessage('o1', 'alice', 'Une seule fois');
+      await vi.waitFor(() => expect(chat.db.messages.size).toBe(2));
+      await workflow.shutdown();
+      expect(harness.events).toEqual([]);
+
+      const restarted = harness.restart();
+      await restarted.getState('o1', 'alice');
+      const done = await waitForStatus(restarted, 'ready');
+      await harness.settle();
+
+      const reply = [...chat.db.messages.values()].find(({ sender }) => sender === AI_SENDER_ID);
+      expect(announced(harness)).toEqual([
+        expect.objectContaining({
+          type: 'ai-assistant.turn.succeeded',
+          payload: { replyMessageId: reply?.id },
+        }),
+      ]);
+      expect(done.lastRegisteredMessage?.id).toBe(reply?.id);
+    });
+  });
+
   describe("l'accès", () => {
     it("refuse un message pendant qu'un tour est en cours", async () => {
       const { workflow, ai } = createWorkflowHarness();

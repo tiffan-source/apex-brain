@@ -1,4 +1,5 @@
-import { assign, fromPromise, setup } from 'xstate';
+import { BusEvent, InMemoryEventBus } from '@org/event-bus';
+import { assign, emit, fromPromise, setup } from 'xstate';
 import { WorkflowOwnerMismatchError } from './errors/workflow-owner-mismatch.error';
 import { InMemoryWorkflowStateStore } from './memory/in-memory-workflow-state-store';
 import { WorkflowDefinition } from './workflow-definition';
@@ -26,6 +27,7 @@ function counterMachine(step: ReturnType<typeof slowStep>) {
     types: {
       context: {} as Context,
       events: {} as { type: 'start'; owner: string },
+      emitted: {} as { type: 'counted'; done: number } | { type: 'audited'; secret: string },
     },
     actors: {
       work: fromPromise<void>(() => step.run()),
@@ -41,7 +43,14 @@ function counterMachine(step: ReturnType<typeof slowStep>) {
       working: {
         invoke: {
           src: 'work',
-          onDone: { target: 'idle', actions: assign({ done: ({ context }) => context.done + 1 }) },
+          onDone: {
+            target: 'idle',
+            actions: [
+              assign({ done: ({ context }) => context.done + 1 }),
+              emit(({ context }) => ({ type: 'counted' as const, done: context.done })),
+              emit({ type: 'audited' as const, secret: 'détail technique' }),
+            ],
+          },
         },
       },
     },
@@ -64,14 +73,30 @@ function createRuntime(definition: Partial<WorkflowDefinition<CounterMachine>> =
   const step = slowStep();
   const machine = counterMachine(step);
   const store = new InMemoryWorkflowStateStore<Context>();
+  const bus = new InMemoryEventBus(logger);
+  const published: BusEvent[] = [];
+  bus.subscribe('*', (event) => void published.push(event));
+  let ids = 0;
   const build = (options: WorkflowRuntimeOptions = {}) =>
     new WorkflowRuntime<CounterMachine>(
-      { name: 'counter', machine, ownerOf: (state) => state.context.owner || undefined, ...definition },
+      {
+        name: 'counter',
+        machine,
+        ownerOf: (state) => state.context.owner || undefined,
+        publicEvents: ['counted'],
+        ...definition,
+      },
       store,
-      { logger, ...options },
+      {
+        logger,
+        bus,
+        newEventId: () => `event-${++ids}`,
+        now: () => new Date('2026-11-23T10:00:00.000Z'),
+        ...options,
+      },
     );
 
-  return { runtime: build(), restart: build, store, step, machine };
+  return { runtime: build(), restart: build, store, step, machine, bus, published };
 }
 
 describe('WorkflowRuntime', () => {
@@ -166,27 +191,71 @@ describe('WorkflowRuntime', () => {
     await expect(store.findById('k')).resolves.toBeNull();
   });
 
-  it('montre chaque transition aux observateurs, et isole celui qui lance', async () => {
-    const { runtime, store, step } = createRuntime();
-    const seen: Array<[unknown, unknown]> = [];
-    const failure = new Error('observateur en panne');
-    runtime.onSnapshot(() => {
-      throw failure;
+  it('publie les faits annoncés dans leur enveloppe, publics ou internes selon la définition', async () => {
+    const { runtime, step, bus, published } = createRuntime();
+    const instance = await runtime.obtain('k', 'alice', { create: true });
+
+    instance?.actor.send({ type: 'start', owner: 'alice' });
+    step.finishAll();
+    await vi.waitFor(() => expect(instance?.actor.getSnapshot().value).toBe('idle'));
+    await runtime.idle();
+    await bus.idle();
+
+    expect(published).toEqual([
+      {
+        id: 'event-1',
+        type: 'counter.counted',
+        source: 'counter',
+        key: 'k',
+        ownerId: 'alice',
+        audience: 'public',
+        occurredAt: '2026-11-23T10:00:00.000Z',
+        payload: { done: 1 },
+      },
+      expect.objectContaining({
+        type: 'counter.audited',
+        audience: 'internal',
+        payload: { secret: 'détail technique' },
+      }),
+    ]);
+  });
+
+  it("ne publie un fait qu'après avoir sauvegardé l'état qui l'a produit", async () => {
+    const { runtime, step, store, bus } = createRuntime();
+    const order: string[] = [];
+    const save = store.save.bind(store);
+    vi.spyOn(store, 'save').mockImplementation(async (state) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await save(state);
+      order.push(`sauvegarde ${String(state.value)} ${state.context.done}`);
     });
-    runtime.onSnapshot(({ snapshot, previous }) => seen.push([previous.value, snapshot.value]));
+    bus.subscribe('counter.counted', () => void order.push('publication'));
 
     const instance = await runtime.obtain('k', 'alice', { create: true });
     instance?.actor.send({ type: 'start', owner: 'alice' });
     step.finishAll();
     await vi.waitFor(() => expect(instance?.actor.getSnapshot().value).toBe('idle'));
-    await runtime.shutdown();
+    await runtime.idle();
+    await bus.idle();
 
-    expect(seen).toEqual([
-      ['idle', 'idle'],
-      ['idle', 'working'],
-      ['working', 'idle'],
-    ]);
-    expect(logger.errors).toEqual([failure, failure, failure]);
-    await expect(store.findById('k')).resolves.toMatchObject({ value: 'idle', context: { done: 1 } });
+    expect(order).toEqual(['sauvegarde idle 0', 'sauvegarde working 0', 'sauvegarde idle 1', 'publication']);
+  });
+
+  it('publie quand même si la sauvegarde échoue, et ne laisse jamais une panne du bus atteindre la machine', async () => {
+    const { runtime, step, store, bus } = createRuntime();
+    const saveFailure = new Error('stockage injoignable');
+    const busFailure = new Error('bus injoignable');
+    vi.spyOn(store, 'save').mockRejectedValue(saveFailure);
+    vi.spyOn(bus, 'publish').mockRejectedValue(busFailure);
+
+    const instance = await runtime.obtain('k', 'alice', { create: true });
+    instance?.actor.send({ type: 'start', owner: 'alice' });
+    step.finishAll();
+    await vi.waitFor(() => expect(instance?.actor.getSnapshot().value).toBe('idle'));
+    await runtime.idle();
+
+    expect(bus.publish).toHaveBeenCalledTimes(2);
+    expect(instance?.actor.getSnapshot().status).toBe('active');
+    expect(logger.errors).toEqual([saveFailure, saveFailure, saveFailure, busFailure, busFailure]);
   });
 });

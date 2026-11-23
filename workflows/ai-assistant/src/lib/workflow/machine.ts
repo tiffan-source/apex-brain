@@ -1,5 +1,5 @@
 import { IdGenerator } from '@org/chore';
-import { assign, fromPromise, setup } from 'xstate';
+import { assign, emit, fromPromise, setup } from 'xstate';
 import { SystemContextProvider } from '../context/system-context.provider';
 import {
   AI_SENDER_ID,
@@ -33,20 +33,20 @@ export type MachineDependencies = {
   idGenerator: IdGenerator;
   /** Horloge des pannes, remplaçable dans les tests. */
   now?: () => Date;
-  /**
-   * Appelé quand la réponse d'Akari est écrite, avant que le tour ne se termine. Un tour rejoué après
-   * un redémarrage peut l'appeler de nouveau, avec le même `replyMessageId`.
-   */
-  onTurnSucceeded?: (turn: SucceededTurn) => Promise<void>;
 };
 
-/** Un tour qui s'est terminé par une réponse d'Akari. */
-export type SucceededTurn = {
-  ownerId: string;
-  objectiveId: string;
-  /** L'id réservé pour la réponse d'Akari, le même si le tour est rejoué. */
-  replyMessageId: string;
-};
+/**
+ * Les faits que la machine annonce (`emit`), sans savoir qui écoute : le runtime les publie dans le bus
+ * sous `ai-assistant.<type>` (docs/adr/0010-runtime-des-workflows-et-bus-d-evenements.md).
+ */
+export type AssistantAnnouncement =
+  /**
+   * Akari a répondu, sa réponse est écrite. Un tour rejoué après un redémarrage peut l'annoncer de
+   * nouveau, avec le même `replyMessageId`.
+   */
+  | { type: 'turn.succeeded'; replyMessageId: string }
+  /** Une panne a arrêté le tour : son code, son étape, son message technique. */
+  | { type: 'turn.failed'; code: string; step: string; message: string; at: string };
 
 export type WorkflowEvent =
   | { type: 'message.send'; prompt: string; objectiveId: string; userId: string }
@@ -119,6 +119,7 @@ export const getMachine = (deps: MachineDependencies) => {
     types: {
       context: {} as WorkflowContext,
       events: {} as WorkflowEvent,
+      emitted: {} as AssistantAnnouncement,
     },
     actions: {
       recordActivity: assign({
@@ -127,23 +128,22 @@ export const getMachine = (deps: MachineDependencies) => {
           { step: params.step, at: now().toISOString() },
         ],
       }),
+      /** Annoncer la panne que `failedTurn` vient de poser dans le contexte. */
+      announceFailure: emit(({ context }) => {
+        const error = context.lastError ?? toWorkflowError(new Error('Unknown failure'), 'unknown');
+        return {
+          type: 'turn.failed' as const,
+          code: error.code,
+          step: error.step,
+          message: error.message,
+          at: error.at,
+        };
+      }),
     },
     actors: {
-      registerMessage: fromPromise<RegisterMessageResult, RegisterMessageInput>(async ({ input }) => {
-        const registered = await deps.chatService.registerMessage(input);
-
-        // La réponse d'Akari est écrite : le tour a réussi. On le signale dans le même acteur (et non
-        // dans un nouvel état) pour qu'un snapshot persisté pendant l'écriture reste restaurable.
-        if (input.senderId === AI_SENDER_ID) {
-          await deps.onTurnSucceeded?.({
-            ownerId: input.ownerId,
-            objectiveId: input.conversationExternalRef,
-            replyMessageId: input.messageId,
-          });
-        }
-
-        return registered;
-      }),
+      registerMessage: fromPromise<RegisterMessageResult, RegisterMessageInput>(({ input }) =>
+        deps.chatService.registerMessage(input),
+      ),
       generateResponse: fromPromise<
         AIResponse,
         TurnInput & { prompt: string; previousInteractionId?: string }
@@ -225,7 +225,10 @@ export const getMachine = (deps: MachineDependencies) => {
           },
           onError: {
             target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-            actions: assign(({ event }) => failedTurn(event.error, 'RegisteringUserMessageInConversation')),
+            actions: [
+              assign(({ event }) => failedTurn(event.error, 'RegisteringUserMessageInConversation')),
+              'announceFailure',
+            ],
           },
         },
       },
@@ -262,12 +265,15 @@ export const getMachine = (deps: MachineDependencies) => {
             },
             {
               target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-              actions: assign(() => failedTurn(new UnexpectedAIResponseError(), 'SendingPromptToAI')),
+              actions: [
+                assign(() => failedTurn(new UnexpectedAIResponseError(), 'SendingPromptToAI')),
+                'announceFailure',
+              ],
             },
           ],
           onError: {
             target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-            actions: assign(({ event }) => failedTurn(event.error, 'SendingPromptToAI')),
+            actions: [assign(({ event }) => failedTurn(event.error, 'SendingPromptToAI')), 'announceFailure'],
           },
         },
       },
@@ -289,17 +295,28 @@ export const getMachine = (deps: MachineDependencies) => {
           }),
           onDone: {
             target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-            actions: assign({
-              aiResponse: null,
-              toolCallResults: [],
-              currentToolCall: undefined,
-              pendingAIMessageId: undefined,
-              lastRegisteredMessage: ({ event }) => event.output.message ?? undefined,
-            }),
+            actions: [
+              // La réponse d'Akari est écrite : le tour a réussi. Annoncé avant que l'id réservé ne
+              // soit effacé, et repris tel quel si l'étape est rejouée après un redémarrage.
+              emit(({ context, event }) => ({
+                type: 'turn.succeeded' as const,
+                replyMessageId: event.output.message?.id ?? context.pendingAIMessageId ?? '',
+              })),
+              assign({
+                aiResponse: null,
+                toolCallResults: [],
+                currentToolCall: undefined,
+                pendingAIMessageId: undefined,
+                lastRegisteredMessage: ({ event }) => event.output.message ?? undefined,
+              }),
+            ],
           },
           onError: {
             target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-            actions: assign(({ event }) => failedTurn(event.error, 'RegisteringAIResponseInConversation')),
+            actions: [
+              assign(({ event }) => failedTurn(event.error, 'RegisteringAIResponseInConversation')),
+              'announceFailure',
+            ],
           },
         },
       },
@@ -485,12 +502,18 @@ export const getMachine = (deps: MachineDependencies) => {
             },
             {
               target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-              actions: assign(() => failedTurn(new UnexpectedAIResponseError(), 'SendingCallResultToAI')),
+              actions: [
+                assign(() => failedTurn(new UnexpectedAIResponseError(), 'SendingCallResultToAI')),
+                'announceFailure',
+              ],
             },
           ],
           onError: {
             target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-            actions: assign(({ event }) => failedTurn(event.error, 'SendingCallResultToAI')),
+            actions: [
+              assign(({ event }) => failedTurn(event.error, 'SendingCallResultToAI')),
+              'announceFailure',
+            ],
           },
         },
         // Les résultats envoyés appartiennent à cette interaction : une nouvelle série d'outils

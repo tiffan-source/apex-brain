@@ -11,6 +11,7 @@ import type {
   Subscription,
 } from 'xstate';
 import { createActor } from 'xstate';
+import type { BusEvent, EventBus } from '@org/event-bus';
 import { WorkflowOwnerMismatchError } from './errors/workflow-owner-mismatch.error';
 import { StoredWorkflowState, WorkflowStateStore } from './protocols/workflow-state-store';
 import { WorkflowDefinition } from './workflow-definition';
@@ -21,11 +22,20 @@ export interface WorkflowLogger {
 }
 
 export type WorkflowRuntimeOptions = {
+  /**
+   * Où publier les faits que la machine annonce (`emit`), une fois sauvegardé l'état qui les a produits.
+   * Sans bus, ils ne sortent pas du runtime.
+   */
+  bus?: EventBus;
   /** Après ce délai sans activité, une instance au repos quitte la mémoire (elle reste stockée). Défaut : 30 min. */
   idleTimeoutMs?: number;
   /** Observateur d'inspection XState (désactivé par défaut). */
   inspect?: Observer<InspectionEvent> | ((event: InspectionEvent) => void);
   logger?: WorkflowLogger;
+  /** L'id d'un événement publié. Défaut : un UUID. */
+  newEventId?: () => string;
+  /** L'horloge des événements publiés, remplaçable dans les tests. */
+  now?: () => Date;
 };
 
 /** Une instance en mémoire : sa clé, la personne à qui elle appartient, son acteur. */
@@ -33,14 +43,6 @@ export type WorkflowInstance<TMachine extends AnyStateMachine> = {
   readonly key: string;
   readonly ownerId: string;
   readonly actor: Actor<TMachine>;
-};
-
-/** Ce qu'un observateur apprend à chaque transition d'une instance. */
-export type WorkflowSnapshotChange<TMachine extends AnyStateMachine> = {
-  instance: WorkflowInstance<TMachine>;
-  snapshot: SnapshotFrom<TMachine>;
-  /** Le snapshot d'avant la transition. */
-  previous: SnapshotFrom<TMachine>;
 };
 
 type Tracked<TMachine extends AnyStateMachine> = {
@@ -51,7 +53,8 @@ type Tracked<TMachine extends AnyStateMachine> = {
   /** Les sauvegardes partent l'une après l'autre : une ancienne n'écrase jamais une plus récente. */
   persisting: Promise<void>;
   subscription?: Subscription;
-  previous: SnapshotFrom<TMachine>;
+  /** Les faits annoncés pendant la transition en cours, publiés après la sauvegarde de son état. */
+  outbox: BusEvent[];
 };
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -73,13 +76,18 @@ function hasNoRunningStep(snapshot: Snapshot<unknown>): boolean {
  * relance l'étape qui était en cours). Chaque transition est sauvegardée, dans l'ordre. Les instances au
  * repos quittent la mémoire après un délai d'inactivité ; à l'arrêt, les sauvegardes en cours se
  * terminent. Il ne sait rien du workflow au-delà de sa définition (`WorkflowDefinition`).
+ *
+ * Il est le seul à écouter les faits que la machine annonce (`emit`) : il les met dans leur enveloppe et
+ * les publie dans le bus, après avoir sauvegardé l'état qui les a produits. Une erreur du bus ne remonte
+ * jamais dans la machine.
  */
 export class WorkflowRuntime<TMachine extends AnyStateMachine> {
   private readonly instances = new Map<string, Tracked<TMachine>>();
   private readonly locks = new Map<string, Promise<void>>();
-  private readonly observers = new Set<(change: WorkflowSnapshotChange<TMachine>) => void>();
   private readonly logger: WorkflowLogger;
   private readonly idleTimeoutMs: number;
+  private readonly newEventId: () => string;
+  private readonly now: () => Date;
 
   constructor(
     private readonly definition: WorkflowDefinition<TMachine>,
@@ -88,6 +96,8 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
   ) {
     this.logger = options.logger ?? consoleLogger;
     this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    this.newEventId = options.newEventId ?? (() => crypto.randomUUID());
+    this.now = options.now ?? (() => new Date());
   }
 
   /** Le nom du workflow hébergé. */
@@ -110,7 +120,11 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
    * pour `ownerId`. `null` quand rien n'existe et que `create` est faux. Un état stocké qui appartient à
    * quelqu'un d'autre lève `WorkflowOwnerMismatchError`.
    */
-  obtain(key: string, ownerId: string, { create }: { create: boolean }): Promise<WorkflowInstance<TMachine> | null> {
+  obtain(
+    key: string,
+    ownerId: string,
+    { create }: { create: boolean },
+  ): Promise<WorkflowInstance<TMachine> | null> {
     return this.withLock(key, async () => {
       const tracked = this.instances.get(key);
 
@@ -134,15 +148,6 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
 
       return create ? this.track(key, ownerId, this.createActor()) : null;
     });
-  }
-
-  /**
-   * Observer chaque transition de chaque instance (après la transition, avant sa sauvegarde). Un observateur
-   * qui lance est journalisé, sans gêner les autres ni la machine. Rend de quoi se désabonner.
-   */
-  onSnapshot(observer: (change: WorkflowSnapshotChange<TMachine>) => void): () => void {
-    this.observers.add(observer);
-    return () => this.observers.delete(observer);
   }
 
   /**
@@ -182,7 +187,8 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
         const tracked = this.instances.get(key);
         if (!tracked) return;
 
-        if (!this.isResting(tracked.actor.getSnapshot()) || now - tracked.lastActivity < this.idleTimeoutMs) return;
+        if (!this.isResting(tracked.actor.getSnapshot()) || now - tracked.lastActivity < this.idleTimeoutMs)
+          return;
 
         await this.release(key, tracked);
         evicted.push(key);
@@ -196,6 +202,16 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
   async shutdown(): Promise<void> {
     for (const [key, tracked] of [...this.instances]) {
       await this.withLock(key, () => this.release(key, tracked));
+    }
+  }
+
+  /** Attendre que les sauvegardes et les publications parties soient faites (tests). */
+  async idle(): Promise<void> {
+    for (;;) {
+      const chains = [...this.instances.values()].map((tracked) => tracked.persisting);
+      await Promise.all(chains);
+      const current = [...this.instances.values()].map((tracked) => tracked.persisting);
+      if (current.every((chain) => chains.includes(chain))) return;
     }
   }
 
@@ -225,14 +241,22 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
       actor,
       lastActivity: Date.now(),
       persisting: Promise.resolve(),
-      previous: actor.getSnapshot(),
+      outbox: [],
     };
+
+    // XState remet les faits d'une transition avant de notifier ses observateurs : ils attendent ici la
+    // sauvegarde de l'état qu'ils accompagnent. Ce rappel ne doit jamais lancer, XState le relancerait.
+    actor.on('*', (emitted) => {
+      try {
+        tracked.outbox.push(this.toBusEvent(tracked, emitted as { type: string }));
+      } catch (error) {
+        this.logger.error(`Workflow ${key}: an announced event could not be prepared`, error);
+      }
+    });
 
     tracked.subscription = actor.subscribe({
       next: (snapshot) => {
         tracked.lastActivity = Date.now();
-        this.notify(tracked, snapshot);
-        tracked.previous = snapshot;
         this.schedulePersist(tracked, snapshot);
       },
       error: (error) => this.logger.error(`Workflow ${key} stopped on an unexpected error`, error),
@@ -243,19 +267,14 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
     return tracked;
   }
 
-  private notify(tracked: Tracked<TMachine>, snapshot: SnapshotFrom<TMachine>): void {
-    for (const observer of this.observers) {
-      try {
-        observer({ instance: tracked, snapshot, previous: tracked.previous });
-      } catch (error) {
-        this.logger.error(`Workflow ${tracked.key}: a snapshot observer failed`, error);
-      }
-    }
-  }
-
   private schedulePersist(tracked: Tracked<TMachine>, snapshot: SnapshotFrom<TMachine>): void {
     const machineSnapshot = snapshot as AnyMachineSnapshot;
-    if (machineSnapshot.status !== 'active') return;
+    const events = tracked.outbox.splice(0);
+
+    if (machineSnapshot.status !== 'active') {
+      tracked.persisting = tracked.persisting.then(() => this.publish(tracked.key, events));
+      return;
+    }
 
     // Copie figée au moment de la transition (les dates deviennent des chaînes, comme en base).
     const state = JSON.parse(
@@ -268,9 +287,45 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
       }),
     ) as StoredWorkflowState<ContextFrom<TMachine>>;
 
+    // Sauvegarder, puis publier : qui relit l'état après un événement ne le trouve pas en retard sur lui.
     tracked.persisting = tracked.persisting
       .then(() => this.store.save(state))
-      .catch((error) => this.logger.error(`Failed to persist workflow ${tracked.key}`, error));
+      .catch((error) => this.logger.error(`Failed to persist workflow ${tracked.key}`, error))
+      .then(() => this.publish(tracked.key, events));
+  }
+
+  /** Un fait annoncé par la machine, dans son enveloppe : des données JSON, quel que soit le bus. */
+  private toBusEvent(tracked: Tracked<TMachine>, emitted: { type: string }): BusEvent {
+    const { type, ...payload } = emitted;
+
+    return JSON.parse(
+      JSON.stringify({
+        id: this.newEventId(),
+        type: `${this.definition.name}.${type}`,
+        source: this.definition.name,
+        key: tracked.key,
+        ownerId: tracked.ownerId,
+        audience: this.definition.publicEvents?.includes(type) ? 'public' : 'internal',
+        occurredAt: this.now().toISOString(),
+        payload,
+      }),
+    ) as BusEvent;
+  }
+
+  /** Publier dans l'ordre ; une panne du bus est journalisée, la machine n'en sait rien. */
+  private async publish(key: string, events: BusEvent[]): Promise<void> {
+    if (!this.options.bus) return;
+
+    for (const event of events) {
+      try {
+        await this.options.bus.publish(event);
+      } catch (error) {
+        this.logger.error(
+          `Workflow ${key}: the event ${event.type} (${event.id}) could not be published`,
+          error,
+        );
+      }
+    }
   }
 
   private isResting(snapshot: SnapshotFrom<TMachine>): boolean {

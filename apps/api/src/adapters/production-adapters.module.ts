@@ -12,6 +12,7 @@ import {
 import { AuthProvider } from '@org/auth';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { IdGenerator, UuidIdGenerator } from '@org/chore';
+import { EventBus, InMemoryEventBus } from '@org/event-bus';
 import { FirebaseClientDataAccess, FirebaseWorkflowStateStore } from '@org/firebase';
 import { createGeminiInteractionsClient, GeminiInteractiveAIProvider } from '@org/gemini';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
@@ -27,6 +28,7 @@ import {
 } from '@org/supabase';
 import { InMemoryWorkflowStateStore, WorkflowStateStore } from '@org/workflow-runtime';
 import type { Environment } from '../config/environment';
+import { eventBusLogger } from '../events/event-bus.logger';
 import { PORTS } from './ports';
 
 @Module({})
@@ -85,6 +87,8 @@ export class ProductionAdaptersModule {
                   }),
                 ),
         },
+        // Une seule instance de l'API : le bus tient dans sa mémoire (docs/adr/0010).
+        { provide: EventBus, useFactory: () => new InMemoryEventBus(eventBusLogger) },
         { provide: Clock, useFactory: () => new SystemClock() },
         // En mémoire jusqu'aux adaptateurs Firestore (issue #13) : le journal est perdu au redémarrage.
         { provide: AkariRuleSource, useFactory: () => new InMemoryAkariRuleSource() },

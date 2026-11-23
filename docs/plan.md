@@ -222,8 +222,11 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE.
 - **Runtime des workflows et bus d'événements** ([ADR 0010](./adr/0010-runtime-des-workflows-et-bus-d-evenements.md)),
   en quatre étapes. Fait : le runtime générique (`workflows/runtime`) héberge les instances de
-  l'assistant (création, restauration, sauvegarde ordonnée, éviction, oubli), sans changer de
-  comportement. Restent le bus et le pont `emit`, le flux SSE, le bus Redis.
+  l'assistant (création, restauration, sauvegarde ordonnée, éviction, oubli) ; le bus
+  (`libs/event-bus`, en mémoire) reçoit les faits que la machine annonce (`turn.succeeded`,
+  `turn.failed`), publiés par le runtime après la sauvegarde ; le comptage d'usage d'Akari et la
+  journalisation des pannes en sont des abonnés (plus de rappel dans la machine). Restent le flux SSE
+  et le bus Redis.
 - **Rôles** ([ADR 0008](./adr/0008-roles.md)) : `standard`, `premium` et `admin`, lus dans
   `app_metadata.roles`, rendus par `/v2/auth/me`, vérifiés par `@Roles` et `RolesGuard`. Tout
   nouveau compte reçoit `standard` (trigger SQL), les comptes existants l'ont reçu par migration ;

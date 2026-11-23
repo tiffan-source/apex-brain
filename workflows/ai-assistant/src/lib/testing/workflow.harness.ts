@@ -2,6 +2,7 @@ import { ScriptedAIProvider } from '@org/ai/testing';
 import { createInMemoryChatInfrastructure } from '@org/chat/testing';
 import { SequentialIdGenerator } from '@org/chore/testing';
 import { ObjectiveInternalService } from '@org/objective';
+import { BusEvent, InMemoryEventBus } from '@org/event-bus';
 import { createInMemoryObjectiveInfrastructure, seedObjective } from '@org/objective/testing';
 import {
   InMemoryWorkflowStateStore,
@@ -20,7 +21,7 @@ import { ToolPolicy } from '../tools/tool-policy';
 import { ToolRegistry } from '../tools/tool-registry';
 import { WorkflowContext, WorkflowStateValue } from '../model/workflow.model';
 import { aiAssistantWorkflow } from '../workflow/ai-assistant.workflow';
-import { MachineDependencies } from '../workflow/machine';
+import { ConversationMachine, MachineDependencies } from '../workflow/machine';
 import { SendMessageToAIWorkflow } from '../workflow/send-message-to-ai.workflow';
 import { WorkflowStateView, WorkflowStatus } from '../workflow/workflow-state.view';
 
@@ -59,6 +60,11 @@ export function createWorkflowHarness(options: WorkflowRuntimeOptions = {}) {
     new CreateTaskTool(objectiveService),
   ]);
   const workflowStates = new InMemoryWorkflowStateStore<WorkflowContext, WorkflowStateValue>();
+  const bus = new InMemoryEventBus(silentLogger);
+  /** Tout ce que les workflows ont publié, dans l'ordre. */
+  const events: BusEvent[] = [];
+  bus.subscribe('*', (event) => void events.push(event));
+  const runtimes: Array<WorkflowRuntime<ConversationMachine>> = [];
 
   const deps: MachineDependencies = {
     chatService: new ChatService(chat.getConversationsQuery, chat.addMessageCommand),
@@ -71,14 +77,14 @@ export function createWorkflowHarness(options: WorkflowRuntimeOptions = {}) {
   };
 
   const build = (overrides: WorkflowRuntimeOptions = {}) => {
-    const runtimeOptions = { logger: silentLogger, ...options, ...overrides };
-    const runtime = new WorkflowRuntime(aiAssistantWorkflow(deps, runtimeOptions.logger), workflowStates, runtimeOptions);
-    return new SendMessageToAIWorkflow({
-      runtime,
-      chatService: deps.chatService,
-      now: deps.now,
-      logger: runtimeOptions.logger,
+    const runtime = new WorkflowRuntime(aiAssistantWorkflow(deps), workflowStates, {
+      logger: silentLogger,
+      bus,
+      ...options,
+      ...overrides,
     });
+    runtimes.push(runtime);
+    return new SendMessageToAIWorkflow({ runtime, chatService: deps.chatService, now: deps.now });
   };
 
   return {
@@ -90,6 +96,13 @@ export function createWorkflowHarness(options: WorkflowRuntimeOptions = {}) {
     chat,
     objectives,
     workflowStates,
+    bus,
+    events,
+    /** Attendre que les sauvegardes, les publications et leurs abonnés aient fini. */
+    settle: async () => {
+      for (const runtime of runtimes) await runtime.idle();
+      await bus.idle();
+    },
   };
 }
 

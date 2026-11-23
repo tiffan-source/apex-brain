@@ -21,4 +21,9 @@ export type WorkflowDefinition<TMachine extends AnyStateMachine> = {
    * veut dire sans étape en cours (aucun acteur invoqué).
    */
   isResting?: (snapshot: SnapshotFrom<TMachine>) => boolean;
+  /**
+   * Les faits annoncés (`emit`) qui peuvent aller au client de la personne. Les autres restent sur le
+   * serveur (`audience: 'internal'`).
+   */
+  publicEvents?: readonly string[];
 };

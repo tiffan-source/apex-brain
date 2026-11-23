@@ -1,6 +1,6 @@
 import { ConversationNotFoundError } from '@org/chat';
 import { Result, runWithResult } from '@org/chore';
-import type { WorkflowInstance, WorkflowLogger, WorkflowRuntime } from '@org/workflow-runtime';
+import type { WorkflowInstance, WorkflowRuntime } from '@org/workflow-runtime';
 import { WorkflowOwnerMismatchError } from '@org/workflow-runtime';
 import { NoPendingPermissionError } from '../errors/no-pending-permission.error';
 import { WorkflowBusyError } from '../errors/workflow-busy.error';
@@ -21,15 +21,9 @@ export type SendMessageToAIWorkflowDependencies = {
   chatService: IChatActor;
   /** L'horloge de l'état rendu aux clients, remplaçable dans les tests. */
   now?: () => Date;
-  logger?: WorkflowLogger;
 };
 
 type AssistantInstance = WorkflowInstance<ConversationMachine>;
-
-const consoleLogger: WorkflowLogger = {
-  error: (message, error) => console.error(message, error),
-  warn: (message) => console.warn(message),
-};
 
 /**
  * Le workflow « envoyer un message à l'IA » : les règles d'une requête, une instance de la machine par
@@ -41,19 +35,9 @@ const consoleLogger: WorkflowLogger = {
  */
 export class SendMessageToAIWorkflow {
   private readonly runtime: WorkflowRuntime<ConversationMachine>;
-  private readonly logger: WorkflowLogger;
 
   constructor(private readonly deps: SendMessageToAIWorkflowDependencies) {
     this.runtime = deps.runtime;
-    this.logger = deps.logger ?? consoleLogger;
-
-    // Une panne de tour (IA, base…) n'arrête pas le workflow : on la journalise ici, avec son détail.
-    this.runtime.onSnapshot(({ instance, snapshot, previous }) => {
-      const error = snapshot.context.lastError;
-      if (error && error.at !== previous.context.lastError?.at) {
-        this.logger.error(`Workflow ${instance.key}: ${error.code} during ${error.step}: ${error.message}`);
-      }
-    });
   }
 
   /**
@@ -188,7 +172,11 @@ export class SendMessageToAIWorkflow {
   }
 
   /** L'instance en mémoire, sinon restaurée, sinon (si `create`) une nouvelle instance. */
-  private async obtain(objectiveId: string, ownerId: string, create: boolean): Promise<AssistantInstance | null> {
+  private async obtain(
+    objectiveId: string,
+    ownerId: string,
+    create: boolean,
+  ): Promise<AssistantInstance | null> {
     try {
       return await this.runtime.obtain(objectiveId, ownerId, { create });
     } catch (error) {
