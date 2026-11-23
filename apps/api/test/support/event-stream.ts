@@ -31,6 +31,7 @@ export async function openEventStream(url: string, authorization?: string) {
   const messages: StreamMessage[] = [];
   const comments: string[] = [];
   const closed = new Promise<void>((resolve) => res.on('close', resolve));
+  const ended = new Promise<void>((resolve) => res.on('end', resolve));
   res.setEncoding('utf8');
 
   let body: unknown;
@@ -67,6 +68,8 @@ export async function openEventStream(url: string, authorization?: string) {
         },
         { timeout: 3000 },
       ),
+    /** Résout quand le serveur termine le flux ; jamais si c'est le client qui le coupe. */
+    ended,
     close: async () => {
       req.destroy();
       await closed;

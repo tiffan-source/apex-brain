@@ -46,3 +46,28 @@ jobs:
       - run: npx nx vite:test supabase --skip-nx-cache --output-style=static
         env:
           SUPABASE_INTEGRATION: '1'
+
+  redis:
+    name: Intégration contre Redis
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx nx vite:test redis --skip-nx-cache --output-style=static
+        env:
+          REDIS_INTEGRATION: '1'
+          REDIS_URL: redis://localhost:6379

@@ -1,5 +1,5 @@
-import type { DynamicModule, INestApplication, Type } from '@nestjs/common';
-import { Module } from '@nestjs/common';
+import type { DynamicModule, INestApplication, OnApplicationShutdown, Type } from '@nestjs/common';
+import { Inject, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { InteractiveAIProvider } from '@org/ai';
 import { ScriptedAIProvider } from '@org/ai/testing';
@@ -46,18 +46,21 @@ export const TEST_ENVIRONMENT = {
   THROTTLE_ASSISTANT_MESSAGE_LIMIT: '10000',
 };
 
+/** Comme en production, le bus se ferme en dernier, une fois les derniers événements remis. */
 @Module({})
-class InMemoryAdaptersModule {}
+class InMemoryAdaptersModule implements OnApplicationShutdown {
+  constructor(@Inject(EventBus) private readonly bus: EventBus) {}
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.bus.close();
+  }
+}
 
 /**
- * L'application complète (modules, gardes, validation, filtre d'erreurs, configuration HTTP),
- * branchée sur des doublures en mémoire à la place de Supabase, Gemini et Firestore. `modules`
- * ajoute des modules propres à un test (des routes qui n'existent que pour lui).
+ * Les doublures de Supabase, Gemini et Firestore (et de l'horloge, des ids) : à une instance de l'API, ou
+ * partagées par plusieurs, comme elles partagent les vrais services.
  */
-export async function createTestApp(
-  environmentOverrides: Record<string, string> = {},
-  options: { modules?: Type[] } = {},
-) {
+export function createTestInfrastructure() {
   const objectives = createInMemoryObjectiveInfrastructure();
   const chat = createInMemoryChatInfrastructure();
   const auth = new InMemoryAuthProvider();
@@ -66,7 +69,7 @@ export async function createTestApp(
   const akariRules = new InMemoryAkariRuleSource();
   const akariJournal = new InMemoryAkariUsageJournal();
   const clock = new ControllableClock();
-  const bus = new InMemoryEventBus(eventBusLogger);
+  const ids = new SequentialIdGenerator('id');
 
   // Comme le trigger de la base : chaque objectif principal reçoit sa conversation.
   objectives.db.onObjectiveCreated((row) => {
@@ -75,11 +78,33 @@ export async function createTestApp(
   // Comme la cascade de la base : la conversation disparaît avec son objectif.
   objectives.db.onObjectiveDeleted((row) => chat.db.deleteConversation(row.id));
 
+  return { objectives, chat, auth, ai, workflowStates, akariRules, akariJournal, clock, ids };
+}
+
+export type TestInfrastructure = ReturnType<typeof createTestInfrastructure>;
+
+/** Le bus d'une instance de test : en mémoire, ou relié à d'autres (`InMemoryEventBusCluster`). */
+export type TestEventBus = EventBus & { idle(): Promise<void>; readonly subscriberCount: number };
+
+/**
+ * L'application complète (modules, gardes, validation, filtre d'erreurs, configuration HTTP),
+ * branchée sur des doublures en mémoire à la place de Supabase, Gemini, Firestore et Redis. `modules`
+ * ajoute des modules propres à un test (des routes qui n'existent que pour lui) ; `infrastructure` et
+ * `bus` font d'elle une instance parmi d'autres.
+ */
+export async function createTestApp(
+  environmentOverrides: Record<string, string> = {},
+  options: { modules?: Type[]; infrastructure?: TestInfrastructure; bus?: TestEventBus } = {},
+) {
+  const infrastructure = options.infrastructure ?? createTestInfrastructure();
+  const { objectives, chat, auth, ai, workflowStates, akariRules, akariJournal, clock, ids } = infrastructure;
+  const bus = options.bus ?? new InMemoryEventBus(eventBusLogger);
+
   const adapters: DynamicModule = {
     module: InMemoryAdaptersModule,
     global: true,
     providers: [
-      { provide: IdGenerator, useValue: new SequentialIdGenerator('id') },
+      { provide: IdGenerator, useValue: ids },
       { provide: ObjectiveRepository, useValue: objectives.objectiveRepository },
       { provide: TaskRepository, useValue: objectives.taskRepository },
       { provide: GetObjectiveTreeQuery, useValue: objectives.getObjectiveTreeQuery },
@@ -131,14 +156,7 @@ export async function createTestApp(
     app,
     http,
     signIn,
-    objectives,
-    chat,
-    auth,
-    ai,
-    workflowStates,
-    akariRules,
-    akariJournal,
-    clock,
+    ...infrastructure,
     bus,
     settle,
     close: () => app.close(),

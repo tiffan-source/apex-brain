@@ -21,3 +21,27 @@ export type BusEvent<TPayload = Record<string, unknown>> = {
   occurredAt: string;
   payload: TPayload;
 };
+
+/**
+ * Relire un événement transporté en JSON par un bus distant ; `undefined` si ce n'en est pas un (un
+ * message étranger sur le canal, une version incompatible).
+ */
+export function parseBusEvent(text: string): BusEvent | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const texts = ['id', 'type', 'source', 'key', 'ownerId', 'occurredAt'];
+
+  if (!texts.every((field) => typeof candidate[field] === 'string')) return undefined;
+  if (candidate['audience'] !== 'public' && candidate['audience'] !== 'internal') return undefined;
+  const payload = candidate['payload'];
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return undefined;
+
+  return candidate as BusEvent;
+}

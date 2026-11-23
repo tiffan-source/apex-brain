@@ -31,7 +31,7 @@ l'application NestJS `apps/api`.
      ▲                     ▲                        ▲ WorkflowStateStore
      │ AuthProvider        │ ports du domaine       │
 ┌──────────────────────────────────────────────────────────────────────┐
-│ libs/supabase   libs/gemini   libs/firebase   (type:infra)           │
+│ libs/supabase   libs/gemini   libs/firebase   libs/redis (type:infra)│
 └──────────────────────────────────────────────────────────────────────┘
           tout dépend de libs/chore (type:kernel) : Result, CoreError, IdGenerator
 ```
@@ -47,7 +47,7 @@ l'application NestJS `apps/api`.
 | `type:identity` | `user`, `auth`, `akari-access` | `type:identity`, `type:kernel` | le métier, l'infrastructure, NestJS |
 | `type:runtime` | `workflow-runtime`, `event-bus` | `type:runtime`, `type:kernel` | le métier, l'identité, l'infrastructure, NestJS |
 | `type:workflow` | `ai-assistant` | `type:domain`, `type:runtime`, `type:kernel` | l'identité, l'infrastructure, NestJS |
-| `type:infra` | `supabase`, `gemini`, `firebase` | `type:domain`, `type:identity`, `type:workflow`, `type:runtime`, `type:kernel` | — |
+| `type:infra` | `supabase`, `gemini`, `firebase`, `redis` | `type:domain`, `type:identity`, `type:workflow`, `type:runtime`, `type:kernel` | — |
 | `type:app` | `api` | tout | — |
 
 Le métier ne voit jamais la personne ni ses rôles : il ne reçoit que l'id du propriétaire
@@ -85,7 +85,8 @@ domaine, rien hors du dossier `bff/` ne les lit.
   réussis, `Clock`). `AkariAccess.check` décide (`decideAkariAccess`, pure) dans `AkariQuotaGuard`,
   sur l'envoi d'un message ; `AkariAccess.record` compte un tour, abonné du bus à
   `ai-assistant.turn.succeeded` (`AssistantSubscribers`). Le workflow ne connaît ni rôles ni quotas.
-- **Adaptateurs** : `libs/supabase`, `libs/gemini`, `libs/firebase`.
+- **Adaptateurs** : `libs/supabase`, `libs/gemini`, `libs/firebase`, `libs/redis` (le bus entre
+  plusieurs instances).
 - **Workflow de l'assistant** : `workflows/ai-assistant` ([ADR 0004](./adr/0004-orchestrateur.md),
   [PRD](./features/send-message-to-ai-prd.md)) : la machine, ses ports, et les règles d'une requête
   (`SendMessageToAIWorkflow`). `aiAssistantWorkflow(…)` la confie au runtime.
@@ -95,14 +96,20 @@ domaine, rien hors du dossier `bff/` ne les lit.
   `libs/firebase`), éviction des instances au repos, arrêt, oubli. Il est le seul à écouter les faits
   que la machine annonce (`emit`) : il les enveloppe et les publie dans le bus, après avoir sauvegardé
   l'état qui les a produits.
-- **Bus d'événements** : `libs/event-bus`, le port `EventBus` et sa version en mémoire. Un fait porte
-  son type (`ai-assistant.turn.succeeded`), sa source, sa clé, son propriétaire, son `audience`
-  (`public`, vers le client de la personne ; `internal`, jamais hors du serveur) et sa charge. Les
-  réactions de l'API sont des abonnés (`apps/api/src/assistant/assistant.subscribers.ts` : le
-  comptage d'usage d'Akari, la journalisation des pannes de tour), et le flux SSE des clients en est
-  un aussi (`assistant-event-stream.ts` : les événements publics d'un objectif, pour sa
-  propriétaire). Au plus une fois : un fait peut se perdre si le serveur tombe entre la sauvegarde et
-  la publication.
+- **Bus d'événements** : `libs/event-bus`, le port `EventBus` et sa version en mémoire (une seule
+  instance de l'API) ; `libs/redis`, sa version Redis (plusieurs instances, `EVENT_BUS=redis`). Un
+  fait porte son type (`ai-assistant.turn.succeeded`), sa source, sa clé, son propriétaire, son
+  `audience` (`public`, vers le client de la personne ; `internal`, jamais hors du serveur) et sa
+  charge. Les réactions de l'API sont des abonnés livrés sur une seule instance, celle qui publie
+  (`apps/api/src/assistant/assistant.subscribers.ts` : le comptage d'usage d'Akari, la
+  journalisation des pannes de tour) ; le flux SSE des clients est un abonné livré sur chaque
+  instance (`assistant-event-stream.ts`, `delivery: 'every-instance'` : les événements publics d'un
+  objectif, pour sa propriétaire, quelle que soit l'instance où tourne le tour). Au plus une fois :
+  un fait peut se perdre si le serveur tombe entre la sauvegarde et la publication, ou, pour les
+  autres instances, pendant une coupure de Redis.
+- **Arrêt** : les flux SSE se terminent avant que le serveur HTTP ne ferme ses connexions
+  (`beforeApplicationShutdown`), le runtime termine ses sauvegardes et publications, puis le bus se
+  ferme en dernier (module global des adaptateurs), une fois ses abonnés servis.
 - **Racine de composition** : `apps/api/src/adapters/production-adapters.module.ts` (ports →
   adaptateurs) et `apps/api/src/<contexte>/<contexte>.module.ts` (cas d'usage ← ports).
 - **Contrat HTTP** : `apps/api/src/<contexte>/*.schemas.ts` (zod) ; les mêmes schémas valident
@@ -134,10 +141,14 @@ domaine, rien hors du dossier `bff/` ne les lit.
 | Niveau | Où | Ce qu'ils remplacent | Commande |
 |---|---|---|---|
 | Unitaires | `libs/*/src/**/*.spec.ts`, `workflows/*/src/**/*.spec.ts` | toute l'infrastructure (doublures en mémoire) | `npx nx run-many -t vite:test` |
-| e2e HTTP | `apps/api/test/*.e2e.spec.ts` | Supabase, Gemini, Firestore | `npx nx vite:test api` |
+| e2e HTTP | `apps/api/test/*.e2e.spec.ts` | Supabase, Gemini, Firestore, Redis | `npx nx vite:test api` |
 | Intégration | `libs/supabase/src/integration/`, `apps/api/test/integration/` | Gemini (IA scriptée), Firestore (mémoire) | `npx nx run api:test-integration` et `SUPABASE_INTEGRATION=1 npx nx vite:test supabase`, après `supabase start` |
+| Intégration | `libs/redis/src/integration/` | rien (deux instances du bus sur un vrai Redis) | `REDIS_INTEGRATION=1 REDIS_URL=redis://127.0.0.1:6379 npx nx vite:test redis` |
 
 Les doublures en mémoire suivent les règles des vrais adaptateurs (filtre par propriétaire,
 refus d'écraser la ligne d'un autre, un même id deux fois dans une écriture refusé comme par
 Postgres, ordre de création) : un cas d'usage qui passe ses tests unitaires se comporte de la
-même façon sur Supabase. Les tests d'intégration le vérifient.
+même façon sur Supabase. Les tests d'intégration le vérifient. De même, `InMemoryEventBusCluster`
+(`@org/event-bus/testing`) relie plusieurs instances de l'API dans un test comme Redis les relie :
+`createTestApp({}, { infrastructure, bus })` en fait une instance parmi d'autres
+(`assistant-instances.e2e.spec.ts`).

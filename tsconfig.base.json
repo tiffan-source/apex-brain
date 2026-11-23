@@ -43,7 +43,9 @@
       "@org/firebase": ["./libs/firebase/src/index.ts"],
       "@org/ai-assistant": ["./workflows/ai-assistant/src/index.ts"],
       "@org/workflow-runtime": ["./workflows/runtime/src/index.ts"],
-      "@org/event-bus": ["./libs/event-bus/src/index.ts"]
+      "@org/event-bus": ["./libs/event-bus/src/index.ts"],
+      "@org/event-bus/testing": ["./libs/event-bus/src/testing.ts"],
+      "@org/redis": ["./libs/redis/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp", "dist"]

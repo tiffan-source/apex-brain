@@ -222,12 +222,16 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Assistant** : le flux SSE existe (`GET …/assistant/events`) ; reste à le brancher dans le client
   web et le mobile, à la place de l'interrogation chaque seconde.
 - **Runtime des workflows et bus d'événements** ([ADR 0010](./adr/0010-runtime-des-workflows-et-bus-d-evenements.md)),
-  en quatre étapes. Fait : le runtime générique (`workflows/runtime`) héberge les instances de
+  fait en quatre étapes : le runtime générique (`workflows/runtime`) héberge les instances de
   l'assistant (création, restauration, sauvegarde ordonnée, éviction, oubli) ; le bus
-  (`libs/event-bus`, en mémoire) reçoit les faits que la machine annonce (`turn.succeeded`,
-  `turn.failed`), publiés par le runtime après la sauvegarde ; le comptage d'usage d'Akari et la
-  journalisation des pannes en sont des abonnés (plus de rappel dans la machine) ; le flux SSE porte
-  à la propriétaire d'un objectif son état puis ses événements publics. Reste le bus Redis.
+  (`libs/event-bus`) reçoit les faits que la machine annonce (`turn.succeeded`, `turn.failed`),
+  publiés par le runtime après la sauvegarde ; le comptage d'usage d'Akari et la journalisation des
+  pannes en sont des abonnés (plus de rappel dans la machine) ; le flux SSE porte à la propriétaire
+  d'un objectif son état puis ses événements publics ; le bus Redis (`libs/redis`,
+  `EVENT_BUS=redis`) relie plusieurs instances, les réactions restant sur l'instance du tour.
+  Restent : **une conversation sur une seule instance** (lire son état ailleurs la restaure et
+  relance l'étape en cours, voir l'ADR) avant de lancer plusieurs instances ; une boîte d'envoi si un
+  abonné ne doit jamais perdre un fait.
 - **Rôles** ([ADR 0008](./adr/0008-roles.md)) : `standard`, `premium` et `admin`, lus dans
   `app_metadata.roles`, rendus par `/v2/auth/me`, vérifiés par `@Roles` et `RolesGuard`. Tout
   nouveau compte reçoit `standard` (trigger SQL), les comptes existants l'ont reçu par migration ;
@@ -274,7 +278,8 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
   ne les lira. Les clients à jour lisent `activity` (`docs/adr/0005-activite-de-l-assistant.md`).
 - **Backlog d'Apex** encore ouvert : laisser filer (objectif, étape, pas), renommer les cas
   d'usage selon le métier (`DefineObjective`…), plusieurs instances du serveur (les
-  acteurs XState vivent en mémoire d'un seul processus).
+  acteurs XState vivent en mémoire d'un seul processus ; le bus Redis relie déjà les instances, reste
+  qu'une conversation ne vive que sur l'une d'elles).
 
 ## 8. Questions ouvertes
 

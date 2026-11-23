@@ -1,8 +1,9 @@
 import { BusEvent } from './bus-event';
-import { BusHandler, BusLogger, BusSubscription } from './event-bus';
+import { BusDelivery, BusHandler, BusLogger, BusSubscribeOptions, BusSubscription } from './event-bus';
 
 type Subscriber = {
   type: string;
+  delivery: BusDelivery;
   handler: BusHandler;
   /** Les livraisons de cet abonné, l'une après l'autre. */
   queue: Promise<void>;
@@ -30,8 +31,14 @@ export class LocalEventDispatcher {
     return this.subscribers.size;
   }
 
-  subscribe(type: string, handler: BusHandler): BusSubscription {
-    const subscriber: Subscriber = { type, handler, queue: Promise.resolve(), active: true };
+  subscribe(type: string, handler: BusHandler, options: BusSubscribeOptions = {}): BusSubscription {
+    const subscriber: Subscriber = {
+      type,
+      delivery: options.delivery ?? 'one-instance',
+      handler,
+      queue: Promise.resolve(),
+      active: true,
+    };
     this.subscribers.add(subscriber);
 
     return {
@@ -42,10 +49,14 @@ export class LocalEventDispatcher {
     };
   }
 
-  /** Remettre l'événement à chaque abonné concerné, après ceux qu'il a déjà reçus. */
-  dispatch(event: BusEvent): void {
+  /**
+   * Remettre l'événement à chaque abonné concerné, après ceux qu'il a déjà reçus : tous, ou seulement ceux
+   * d'un mode de livraison (un bus distant livre `one-instance` en publiant, `every-instance` en recevant).
+   */
+  dispatch(event: BusEvent, delivery?: BusDelivery): void {
     for (const subscriber of this.subscribers) {
       if (subscriber.type !== '*' && subscriber.type !== event.type) continue;
+      if (delivery && subscriber.delivery !== delivery) continue;
 
       this.pending += 1;
       subscriber.queue = subscriber.queue.then(async () => {
@@ -64,6 +75,13 @@ export class LocalEventDispatcher {
   idle(): Promise<void> {
     if (this.pending === 0) return Promise.resolve();
     return new Promise((resolve) => this.waiters.push(resolve));
+  }
+
+  /** Attendre les livraisons en cours, puis retirer tous les abonnés. */
+  async close(): Promise<void> {
+    await this.idle();
+    for (const subscriber of this.subscribers) subscriber.active = false;
+    this.subscribers.clear();
   }
 
   private settle(): void {

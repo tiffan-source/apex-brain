@@ -238,8 +238,11 @@ propriétaire de l'objectif, authentifiée comme sur toute route (`Authorization
 - Refusé avant tout flux, en JSON : `401` sans jeton, `404 CONVERSATION_NOT_FOUND` pour l'objectif
   d'une autre personne, ou sans conversation.
 - Le flux remplace l'interrogation chaque seconde, pas la lecture. Il se ferme (durée maximale d'une
-  fonction, proxy, réseau) : le client se reconnecte après `retry` (3 s) et repart de l'état que le
-  flux renvoie à l'ouverture.
+  fonction, proxy, réseau, arrêt ou redéploiement du serveur) : le client se reconnecte après
+  `retry` (3 s) et repart de l'état que le flux renvoie à l'ouverture.
+- Le flux peut être ouvert sur une autre instance de l'API que celle où tourne le tour : avec
+  plusieurs instances, le bus passe par Redis (`EVENT_BUS=redis`). Pendant une coupure de Redis, le
+  flux ne reçoit plus rien ; la reconnexion rattrape l'état.
 - L'`EventSource` des navigateurs n'envoie pas d'en-tête `Authorization`, et React Native n'en a pas :
   il faut un client SSE qui accepte des en-têtes (à base de `fetch` sur le web, une bibliothèque sur
   mobile).

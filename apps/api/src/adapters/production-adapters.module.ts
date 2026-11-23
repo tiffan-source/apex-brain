@@ -1,5 +1,5 @@
-import type { DynamicModule, Provider } from '@nestjs/common';
-import { Module } from '@nestjs/common';
+import type { DynamicModule, OnApplicationShutdown, Provider } from '@nestjs/common';
+import { Inject, Module } from '@nestjs/common';
 import { InteractiveAIProvider } from '@org/ai';
 import {
   AkariRuleSource,
@@ -17,6 +17,7 @@ import { FirebaseClientDataAccess, FirebaseWorkflowStateStore } from '@org/fireb
 import { createGeminiInteractionsClient, GeminiInteractiveAIProvider } from '@org/gemini';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
+import { RedisEventBus } from '@org/redis';
 import {
   SupabaseAddMessageCommand,
   SupabaseAuthServices,
@@ -32,8 +33,18 @@ import { eventBusLogger } from '../events/event-bus.logger';
 import { PORTS } from './ports';
 
 @Module({})
-export class ProductionAdaptersModule {
-  /** Les ports branchés sur Supabase, Gemini et Firestore, d'après la configuration. */
+export class ProductionAdaptersModule implements OnApplicationShutdown {
+  constructor(@Inject(EventBus) private readonly bus: EventBus) {}
+
+  /**
+   * Fermer le bus en dernier : module global, ses crochets d'arrêt passent après ceux des modules qui
+   * l'utilisent (le runtime de l'assistant a publié ses derniers événements, les abonnés les traitent).
+   */
+  async onApplicationShutdown(): Promise<void> {
+    await this.bus.close();
+  }
+
+  /** Les ports branchés sur Supabase, Gemini, Firestore et Redis, d'après la configuration. */
   static register(environment: Environment): DynamicModule {
     const supabase: Provider = {
       provide: SupabaseClientDataAccess,
@@ -87,8 +98,19 @@ export class ProductionAdaptersModule {
                   }),
                 ),
         },
-        // Une seule instance de l'API : le bus tient dans sa mémoire (docs/adr/0010).
-        { provide: EventBus, useFactory: () => new InMemoryEventBus(eventBusLogger) },
+        {
+          // En mémoire pour une seule instance de l'API, Redis dès qu'il y en a plusieurs (docs/adr/0010).
+          // Redis injoignable au démarrage : le serveur ne démarre pas.
+          provide: EventBus,
+          useFactory: (): Promise<EventBus> | EventBus =>
+            environment.EVENT_BUS === 'redis'
+              ? RedisEventBus.connect({
+                  url: environment.REDIS_URL as string,
+                  channel: environment.EVENT_BUS_CHANNEL,
+                  logger: eventBusLogger,
+                })
+              : new InMemoryEventBus(eventBusLogger),
+        },
         { provide: Clock, useFactory: () => new SystemClock() },
         // En mémoire jusqu'aux adaptateurs Firestore (issue #13) : le journal est perdu au redémarrage.
         { provide: AkariRuleSource, useFactory: () => new InMemoryAkariRuleSource() },

@@ -1,4 +1,5 @@
-import { BusEvent } from './bus-event';
+import { BusEvent, parseBusEvent } from './bus-event';
+import { EventBusClosedError } from './event-bus';
 import { InMemoryEventBus } from './in-memory-event-bus';
 
 let sequence = 0;
@@ -106,5 +107,56 @@ describe('InMemoryEventBus', () => {
 
     expect(received).toEqual([]);
     expect(bus.subscriberCount).toBe(0);
+  });
+
+  it('livre à chaque abonné, quel que soit son mode de livraison : il n’y a qu’une instance', async () => {
+    const bus = new InMemoryEventBus(silent().logger);
+    const received: string[] = [];
+    bus.subscribe('a', () => void received.push('one-instance'));
+    bus.subscribe('a', () => void received.push('every-instance'), { delivery: 'every-instance' });
+
+    await bus.publish(event('a'));
+    await bus.idle();
+
+    expect(received).toEqual(['one-instance', 'every-instance']);
+  });
+
+  it('se ferme après que les abonnés ont traité ce qu’ils ont reçu, puis refuse de publier', async () => {
+    const bus = new InMemoryEventBus(silent().logger);
+    const received: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    bus.subscribe('a', async (delivered) => {
+      await gate;
+      received.push(delivered.id);
+    });
+
+    const published = event('a');
+    await bus.publish(published);
+    const closed = bus.close();
+    release();
+    await closed;
+
+    expect(received).toEqual([published.id]);
+    expect(bus.subscriberCount).toBe(0);
+    await expect(bus.publish(event('a'))).rejects.toBeInstanceOf(EventBusClosedError);
+  });
+});
+
+describe('parseBusEvent', () => {
+  it('relit un événement transporté en JSON', () => {
+    const published = event('a', { replyMessageId: 'm1' });
+
+    expect(parseBusEvent(JSON.stringify(published))).toEqual(published);
+  });
+
+  it.each([
+    ['du texte', 'pas du json'],
+    ['un tableau', '[]'],
+    ['un id manquant', JSON.stringify({ ...event('a'), id: undefined })],
+    ['une audience inconnue', JSON.stringify({ ...event('a'), audience: 'everyone' })],
+    ['une charge qui n’est pas un objet', JSON.stringify({ ...event('a'), payload: 'texte' })],
+  ])('ignore %s', (_label, text) => {
+    expect(parseBusEvent(text)).toBeUndefined();
   });
 });

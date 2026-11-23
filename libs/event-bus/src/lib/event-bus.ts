@@ -7,8 +7,28 @@ export type BusSubscription = {
   unsubscribe(): void;
 };
 
+/**
+ * Où un abonné reçoit les événements quand l'API tourne sur plusieurs instances.
+ *
+ * - `one-instance` (par défaut) : chaque événement est remis sur une seule instance, celle qui le
+ *   publie. Pour les réactions du serveur (compter un tour, journaliser une panne), qui ne doivent pas
+ *   se répéter sur chaque instance.
+ * - `every-instance` : chaque instance le reçoit, quelle que soit celle qui le publie. Pour ce qui suit
+ *   une connexion ouverte sur l'instance (le flux SSE d'un client), qui n'est pas forcément celle où
+ *   tourne le workflow.
+ *
+ * Avec une seule instance, les deux reviennent au même.
+ */
+export type BusDelivery = 'one-instance' | 'every-instance';
+
+export type BusSubscribeOptions = {
+  delivery?: BusDelivery;
+};
+
 export interface BusLogger {
   error(message: string, error?: unknown): void;
+  /** Ce qui n'est pas une panne mais mérite une trace (une connexion rétablie). */
+  info?(message: string): void;
 }
 
 /**
@@ -21,14 +41,26 @@ export interface BusLogger {
  * publiés ; une erreur d'abonné est journalisée, jamais remontée à celui qui publie ni aux autres abonnés.
  */
 export abstract class EventBus {
-  /** Remettre un événement au bus : résout quand le bus l'a pris en charge, pas quand les abonnés l'ont traité. */
+  /**
+   * Remettre un événement au bus : résout quand le bus l'a pris en charge, pas quand les abonnés l'ont
+   * traité. Rejette si le bus est fermé ou ne peut pas le transporter.
+   */
   abstract publish(event: BusEvent): Promise<void>;
 
-  /** S'abonner à un type d'événement, ou à tous avec `*`. */
-  abstract subscribe(type: string, handler: BusHandler): BusSubscription;
+  /** S'abonner à un type d'événement, ou à tous avec `*` ; sur une seule instance, par défaut. */
+  abstract subscribe(type: string, handler: BusHandler, options?: BusSubscribeOptions): BusSubscription;
 
-  /** Libérer ce que le bus tient (connexions). Sans effet pour un bus en mémoire. */
-  async close(): Promise<void> {
-    /* rien à libérer */
+  /**
+   * Se fermer, en dernier à l'arrêt : les abonnés finissent de traiter ce qu'ils ont reçu, puis le bus ne
+   * publie ni ne livre plus rien et libère ce qu'il tient (connexions).
+   */
+  abstract close(): Promise<void>;
+}
+
+/** Ce que rejette `publish` sur un bus fermé. */
+export class EventBusClosedError extends Error {
+  constructor() {
+    super('The event bus is closed');
+    this.name = 'EventBusClosedError';
   }
 }

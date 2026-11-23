@@ -16,6 +16,7 @@ describe("Flux SSE de l'assistant (e2e)", () => {
   let mallory: Person;
   let objectiveId: string;
   let streams: EventStream[];
+  let closed: boolean;
 
   const createObjective = async (who: Person, title = 'Courir un marathon') => {
     const created = await t
@@ -32,6 +33,7 @@ describe("Flux SSE de l'assistant (e2e)", () => {
     await t.app.listen(0, '127.0.0.1');
     base = await t.app.getUrl();
     streams = [];
+    closed = false;
     alice = t.signIn('alice@apex.test');
     mallory = t.signIn('mallory@apex.test');
     objectiveId = await createObjective(alice);
@@ -39,7 +41,7 @@ describe("Flux SSE de l'assistant (e2e)", () => {
 
   afterEach(async () => {
     for (const stream of streams) await stream.close();
-    await t.close();
+    if (!closed) await t.close();
   });
 
   const open = async (who?: Person, id = objectiveId) => {
@@ -158,6 +160,17 @@ describe("Flux SSE de l'assistant (e2e)", () => {
     await stream.close();
 
     await vi.waitFor(() => expect(t.bus.subscriberCount).toBe(before));
+  });
+
+  it("se termine à l'arrêt du serveur, qui n'attend pas que le client s'en aille", async () => {
+    const stream = await open(alice);
+    await stream.waitFor(() => true);
+
+    closed = true;
+    const startedAt = Date.now();
+    await Promise.all([t.close(), stream.ended]);
+
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
   });
 
   it('est décrit dans le document OpenAPI', async () => {
