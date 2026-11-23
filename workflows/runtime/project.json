@@ -1,0 +1,10 @@
+{
+  "name": "workflow-runtime",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "workflows/runtime/src",
+  "projectType": "library",
+  "tags": ["type:runtime"],
+  "targets": {
+    "typecheck": {}
+  }
+}

@@ -1,3 +1,4 @@
+import type { StoredWorkflowState } from '@org/workflow-runtime';
 import { AIResponse, CallResult, RegisteredMessage, ToolCall } from '../workflow/actors.protocols';
 
 /** La panne qui a interrompu un tour : le tour est revenu au repos, la personne peut réessayer. */
@@ -102,29 +103,7 @@ export const WORKFLOW_AWAITING_PERMISSION: WorkflowStateValue = {
 export const AI_SENDER_ID = 'AI';
 
 /**
- * A persisted workflow: its identifier, its current position and its data.
+ * Un workflow persisté, tel que le runtime le stocke (`@org/workflow-runtime`) : sa clé (l'objectif), sa
+ * valeur, son contexte, et le snapshot XState complet. Le snapshot est absent des documents écrits par Apex.
  */
-export type WorkflowState = {
-  id: string;
-  value: WorkflowStateValue;
-  context: WorkflowContext;
-  /**
-   * Le snapshot XState complet (`actor.getPersistedSnapshot()`), opaque pour le stockage : il
-   * contient les étapes en cours, que la restauration relance. Absent des documents écrits par Apex.
-   */
-  persistedSnapshot?: unknown;
-  /** Dernière écriture (ISO 8601). */
-  updatedAt?: string;
-};
-
-/**
- * Port for persisting and retrieving a workflow's state.
- *
- * Implemented by infrastructure adapters (e.g. Firestore in `@org/firebase`).
- */
-export abstract class IWorkflowStateRepository {
-  abstract save(state: WorkflowState): Promise<void>;
-  abstract findById(id: string): Promise<WorkflowState | null>;
-  /** Sans effet si ce workflow n'a pas d'état persisté. */
-  abstract delete(id: string): Promise<void>;
-}
+export type WorkflowState = StoredWorkflowState<WorkflowContext, WorkflowStateValue>;

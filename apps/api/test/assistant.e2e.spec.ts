@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { AIProviderError } from '@org/ai';
+import type { BusEvent } from '@org/event-bus';
 import { conversationResponseSchema } from '../src/conversation/conversation.schemas';
 import { workflowStateResponseSchema } from '../src/assistant/assistant.schemas';
 import type { TestApp } from './support/test-app';
@@ -171,7 +172,8 @@ describe('Conversation et assistant (e2e)', () => {
       step: 'SendingPromptToAI',
       at: expect.any(String),
     });
-    // Journalisée en une seule entrée, avec son détail : plus de ligne « undefined » à sa suite.
+    // Journalisée par l'abonné des pannes, en une seule entrée, avec son détail.
+    await t.settle();
     expect(logged).toHaveBeenCalledWith(
       `Workflow ${objectiveId}: AI_PROVIDER_FAILURE during SendingPromptToAI: quota`,
     );
@@ -182,7 +184,51 @@ describe('Conversation et assistant (e2e)', () => {
     expect(recovered.lastError).toBeNull();
   });
 
-  describe("accès à Akari selon les rôles", () => {
+  describe("les événements de l'assistant, dans le bus", () => {
+    it('publie une panne en interne, puis un tour réussi en public, sous l’id de la réponse', async () => {
+      const published: BusEvent[] = [];
+      t.bus.subscribe('*', (event) => void published.push(event));
+      const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      t.ai.willRespond(new AIProviderError('quota'), t.ai.text('Me revoilà.'));
+
+      await send('Bonjour');
+      await waitFor('ready');
+      await send('Tu es là ?');
+      const done = await waitFor('ready');
+      await t.settle();
+      logged.mockRestore();
+
+      const turns = published.filter(({ type }) => type.startsWith('ai-assistant.turn.'));
+      expect(
+        turns.map(({ type, source, key, ownerId, audience }) => ({
+          type,
+          source,
+          key,
+          ownerId,
+          audience,
+        })),
+      ).toEqual([
+        {
+          type: 'ai-assistant.turn.failed',
+          source: 'ai-assistant',
+          key: objectiveId,
+          ownerId: alice.id,
+          audience: 'internal',
+        },
+        {
+          type: 'ai-assistant.turn.succeeded',
+          source: 'ai-assistant',
+          key: objectiveId,
+          ownerId: alice.id,
+          audience: 'public',
+        },
+      ]);
+      expect(turns[1].payload).toEqual({ replyMessageId: done.lastRegisteredMessage?.id });
+      expect(new Set(published.map(({ id }) => id)).size).toBe(published.length);
+    });
+  });
+
+  describe('accès à Akari selon les rôles', () => {
     it('ouvre l’envoi à standard, premium et admin', async () => {
       for (const roles of [['standard'], ['premium'], ['admin']] as const) {
         const who = t.signIn(`${roles[0]}@apex.test`, roles);

@@ -35,6 +35,9 @@
         "^default",
         {
           "env": "SUPABASE_INTEGRATION"
+        },
+        {
+          "env": "REDIS_INTEGRATION"
         }
       ]
     }

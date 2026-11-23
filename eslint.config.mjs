@@ -80,15 +80,23 @@ export default [
               bannedExternalImports: infrastructureImports,
             },
             {
-              // Un workflow compose des domaines, sans jamais toucher à leur infrastructure.
-              sourceTag: 'type:workflow',
-              onlyDependOnLibsWithTags: ['type:domain', 'type:kernel'],
+              // Le runtime des workflows : il héberge les acteurs XState et garde leur état, sans rien savoir
+              // d'un workflow en particulier, ni du métier, ni de l'infrastructure (docs/adr/0010).
+              sourceTag: 'type:runtime',
+              onlyDependOnLibsWithTags: ['type:runtime', 'type:kernel'],
               bannedExternalImports: infrastructureImports,
             },
             {
-              // L'infrastructure implémente les ports du domaine, de l'identité et des workflows.
+              // Un workflow compose des domaines, sans jamais toucher à leur infrastructure ; le runtime
+              // l'héberge.
+              sourceTag: 'type:workflow',
+              onlyDependOnLibsWithTags: ['type:domain', 'type:runtime', 'type:kernel'],
+              bannedExternalImports: infrastructureImports,
+            },
+            {
+              // L'infrastructure implémente les ports du domaine, de l'identité, des workflows et du runtime.
               sourceTag: 'type:infra',
-              onlyDependOnLibsWithTags: ['type:domain', 'type:identity', 'type:workflow', 'type:kernel'],
+              onlyDependOnLibsWithTags: ['type:domain', 'type:identity', 'type:workflow', 'type:runtime', 'type:kernel'],
             },
             {
               // L'application est la racine de composition : elle seule assemble tout.
@@ -96,6 +104,7 @@ export default [
               onlyDependOnLibsWithTags: [
                 'type:infra',
                 'type:workflow',
+                'type:runtime',
                 'type:domain',
                 'type:identity',
                 'type:kernel',

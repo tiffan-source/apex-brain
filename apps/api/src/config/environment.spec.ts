@@ -19,6 +19,8 @@ describe('loadEnvironment', () => {
       GEMINI_MODEL: 'gemini-3.8-flash',
       WORKFLOW_STATE_STORE: 'firestore',
       ASSISTANT_IDLE_TIMEOUT_MINUTES: 30,
+      EVENT_BUS: 'memory',
+      EVENT_BUS_CHANNEL: 'apex-brain:events',
     });
   });
 
@@ -66,5 +68,21 @@ describe('loadEnvironment', () => {
     expect(loadEnvironment({ ...withoutFirebase, WORKFLOW_STATE_STORE: 'memory' }).WORKFLOW_STATE_STORE).toBe(
       'memory',
     );
+  });
+
+  it('exige l’adresse de Redis quand le bus passe par Redis', () => {
+    expect(() => loadEnvironment({ ...minimal, EVENT_BUS: 'redis' })).toThrow(/REDIS_URL/);
+    expect(() => loadEnvironment({ ...minimal, EVENT_BUS: 'redis', REDIS_URL: 'pas une url' })).toThrow(
+      /REDIS_URL/,
+    );
+  });
+
+  it('accepte une adresse Redis, chiffrée ou non', () => {
+    for (const url of ['redis://127.0.0.1:6379', 'rediss://default:secret@redis.example.com:6380']) {
+      expect(loadEnvironment({ ...minimal, EVENT_BUS: 'redis', REDIS_URL: url })).toMatchObject({
+        EVENT_BUS: 'redis',
+        REDIS_URL: url,
+      });
+    }
   });
 });

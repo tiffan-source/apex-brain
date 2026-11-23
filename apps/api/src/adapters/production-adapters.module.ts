@@ -1,14 +1,23 @@
-import type { DynamicModule, Provider } from '@nestjs/common';
-import { Module } from '@nestjs/common';
+import type { DynamicModule, OnApplicationShutdown, Provider } from '@nestjs/common';
+import { Inject, Module } from '@nestjs/common';
 import { InteractiveAIProvider } from '@org/ai';
-import { IWorkflowStateRepository, InMemoryWorkflowStateRepository } from '@org/ai-assistant';
+import {
+  AkariRuleSource,
+  AkariUsageJournal,
+  Clock,
+  InMemoryAkariRuleSource,
+  InMemoryAkariUsageJournal,
+  SystemClock,
+} from '@org/akari-access';
 import { AuthProvider } from '@org/auth';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { IdGenerator, UuidIdGenerator } from '@org/chore';
-import { FirebaseClientDataAccess, FirebaseWorkflowStateRepository } from '@org/firebase';
+import { EventBus, InMemoryEventBus } from '@org/event-bus';
+import { FirebaseClientDataAccess, FirebaseWorkflowStateStore } from '@org/firebase';
 import { createGeminiInteractionsClient, GeminiInteractiveAIProvider } from '@org/gemini';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
+import { RedisEventBus } from '@org/redis';
 import {
   SupabaseAddMessageCommand,
   SupabaseAuthServices,
@@ -18,12 +27,24 @@ import {
   SupabaseObjectiveRepository,
   SupabaseTaskRepository,
 } from '@org/supabase';
+import { InMemoryWorkflowStateStore, WorkflowStateStore } from '@org/workflow-runtime';
 import type { Environment } from '../config/environment';
+import { eventBusLogger } from '../events/event-bus.logger';
 import { PORTS } from './ports';
 
 @Module({})
-export class ProductionAdaptersModule {
-  /** Les ports branchés sur Supabase, Gemini et Firestore, d'après la configuration. */
+export class ProductionAdaptersModule implements OnApplicationShutdown {
+  constructor(@Inject(EventBus) private readonly bus: EventBus) {}
+
+  /**
+   * Fermer le bus en dernier : module global, ses crochets d'arrêt passent après ceux des modules qui
+   * l'utilisent (le runtime de l'assistant a publié ses derniers événements, les abonnés les traitent).
+   */
+  async onApplicationShutdown(): Promise<void> {
+    await this.bus.close();
+  }
+
+  /** Les ports branchés sur Supabase, Gemini, Firestore et Redis, d'après la configuration. */
   static register(environment: Environment): DynamicModule {
     const supabase: Provider = {
       provide: SupabaseClientDataAccess,
@@ -64,11 +85,11 @@ export class ProductionAdaptersModule {
             }),
         },
         {
-          provide: IWorkflowStateRepository,
+          provide: WorkflowStateStore,
           useFactory: () =>
             environment.WORKFLOW_STATE_STORE === 'memory'
-              ? new InMemoryWorkflowStateRepository()
-              : new FirebaseWorkflowStateRepository(
+              ? new InMemoryWorkflowStateStore()
+              : new FirebaseWorkflowStateStore(
                   new FirebaseClientDataAccess({
                     projectId: environment.FIREBASE_PROJECT_ID as string,
                     clientEmail: environment.FIREBASE_CLIENT_EMAIL,
@@ -77,6 +98,23 @@ export class ProductionAdaptersModule {
                   }),
                 ),
         },
+        {
+          // En mémoire pour une seule instance de l'API, Redis dès qu'il y en a plusieurs (docs/adr/0010).
+          // Redis injoignable au démarrage : le serveur ne démarre pas.
+          provide: EventBus,
+          useFactory: (): Promise<EventBus> | EventBus =>
+            environment.EVENT_BUS === 'redis'
+              ? RedisEventBus.connect({
+                  url: environment.REDIS_URL as string,
+                  channel: environment.EVENT_BUS_CHANNEL,
+                  logger: eventBusLogger,
+                })
+              : new InMemoryEventBus(eventBusLogger),
+        },
+        { provide: Clock, useFactory: () => new SystemClock() },
+        // En mémoire jusqu'aux adaptateurs Firestore (issue #13) : le journal est perdu au redémarrage.
+        { provide: AkariRuleSource, useFactory: () => new InMemoryAkariRuleSource() },
+        { provide: AkariUsageJournal, useFactory: () => new InMemoryAkariUsageJournal() },
       ],
       exports: [...PORTS],
     };

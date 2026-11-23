@@ -28,6 +28,7 @@ apex-brain/
 ├── libs/objective/           Domaine objectifs / étapes / pas
 ├── libs/auth/                Authentification (identité)
 ├── libs/user/                La personne et ses rôles (identité)
+├── libs/akari-access/        Les droits Akari : règles par rôle, journal d'usage, quota (identité)
 ├── libs/chat/                Domaine conversation
 ├── libs/ai/                  Capacité générique de génération IA (port)
 ├── libs/supabase/            Adaptateurs Supabase (données + auth)
@@ -218,12 +219,31 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
 - **Client mobile** : générer un client typé depuis `/docs-json`.
 - **Base de données** : lancer Supabase depuis `apex-brain` et retirer `supabase/` d'Apex une
   fois le client migré ; verrouiller les règles Firestore (le navigateur n'y écrit plus).
-- **Assistant** : remplacer l'interrogation chaque seconde par un flux SSE.
+- **Assistant** : le flux SSE existe (`GET …/assistant/events`) ; reste à le brancher dans le client
+  web et le mobile, à la place de l'interrogation chaque seconde.
+- **Runtime des workflows et bus d'événements** ([ADR 0010](./adr/0010-runtime-des-workflows-et-bus-d-evenements.md)),
+  fait en quatre étapes : le runtime générique (`workflows/runtime`) héberge les instances de
+  l'assistant (création, restauration, sauvegarde ordonnée, éviction, oubli) ; le bus
+  (`libs/event-bus`) reçoit les faits que la machine annonce (`turn.succeeded`, `turn.failed`),
+  publiés par le runtime après la sauvegarde ; le comptage d'usage d'Akari et la journalisation des
+  pannes en sont des abonnés (plus de rappel dans la machine) ; le flux SSE porte à la propriétaire
+  d'un objectif son état puis ses événements publics ; le bus Redis (`libs/redis`,
+  `EVENT_BUS=redis`) relie plusieurs instances, les réactions restant sur l'instance du tour.
+  Restent : **une conversation sur une seule instance** (lire son état ailleurs la restaure et
+  relance l'étape en cours, voir l'ADR) avant de lancer plusieurs instances ; une boîte d'envoi si un
+  abonné ne doit jamais perdre un fait.
 - **Rôles** ([ADR 0008](./adr/0008-roles.md)) : `standard`, `premium` et `admin`, lus dans
   `app_metadata.roles`, rendus par `/v2/auth/me`, vérifiés par `@Roles` et `RolesGuard`. Tout
   nouveau compte reçoit `standard` (trigger SQL), les comptes existants l'ont reçu par migration ;
   un compte sans rôle n'a accès à rien. Seul l'envoi à Akari est réservé (aux trois rôles). En
   cours : les quotas d'Akari par rôle ([#9](https://github.com/tiffan-source/apex-brain/issues/9)).
+  Fait ([#11](https://github.com/tiffan-source/apex-brain/issues/11)) : `libs/akari-access` (règles,
+  journal, décision), la garde de quota sur l'envoi (`AKARI_QUOTA_EXCEEDED`), le rappel « tour
+  réussi » du workflow, fenêtre `total` seulement. **Les règles et le journal sont encore en
+  mémoire, y compris en production** (journal perdu au redémarrage) : ne pas déployer avant les
+  adaptateurs Firestore ([#13](https://github.com/tiffan-source/apex-brain/issues/13)). Restent
+  les fenêtres `day` et `month` ([#12](https://github.com/tiffan-source/apex-brain/issues/12)),
+  comptées d'ici là comme `total`.
   Reste à décider comment premium s'obtient (un paiement en ferait peut-être une offre avec
   échéance plutôt qu'un rôle).
 - **Étapes et pas sans ordre** : ils sont indépendants, aucun n'en attend un autre. Une étape est
@@ -258,7 +278,8 @@ Supabase d'Apex ; [`docs/technical/queries.md`](./technical/queries.md) est mis 
   ne les lira. Les clients à jour lisent `activity` (`docs/adr/0005-activite-de-l-assistant.md`).
 - **Backlog d'Apex** encore ouvert : laisser filer (objectif, étape, pas), renommer les cas
   d'usage selon le métier (`DefineObjective`…), plusieurs instances du serveur (les
-  acteurs XState vivent en mémoire d'un seul processus).
+  acteurs XState vivent en mémoire d'un seul processus ; le bus Redis relie déjà les instances, reste
+  qu'une conversation ne vive que sur l'une d'elles).
 
 ## 8. Questions ouvertes
 

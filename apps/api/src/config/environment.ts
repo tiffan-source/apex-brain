@@ -40,6 +40,11 @@ export const environmentSchema = z
 
     ASSISTANT_IDLE_TIMEOUT_MINUTES: z.coerce.number().positive().default(30),
 
+    // Le bus d'événements (docs/adr/0010) : en mémoire pour une seule instance, Redis dès qu'il y en a plusieurs.
+    EVENT_BUS: z.enum(['memory', 'redis']).default('memory'),
+    REDIS_URL: z.url().optional(),
+    EVENT_BUS_CHANNEL: z.string().min(1).default('apex-brain:events'),
+
     THROTTLE_DEFAULT_LIMIT: z.coerce.number().int().positive().default(300),
     THROTTLE_AUTH_LIMIT: z.coerce.number().int().positive().default(10),
     THROTTLE_ASSISTANT_MESSAGE_LIMIT: z.coerce.number().int().positive().default(20),
@@ -51,6 +56,10 @@ export const environmentSchema = z
         path: ['FIREBASE_PROJECT_ID'],
         message: 'requis quand WORKFLOW_STATE_STORE=firestore',
       });
+    }
+
+    if (environment.EVENT_BUS === 'redis' && !environment.REDIS_URL) {
+      context.addIssue({ code: 'custom', path: ['REDIS_URL'], message: 'requis quand EVENT_BUS=redis' });
     }
   });
 

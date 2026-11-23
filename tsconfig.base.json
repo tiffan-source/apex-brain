@@ -30,6 +30,8 @@
       "@org/objective/testing": ["./libs/objective/src/testing.ts"],
       "@org/objective/bff": ["./libs/objective/src/bff.ts"],
       "@org/user": ["./libs/user/src/index.ts"],
+      "@org/akari-access": ["./libs/akari-access/src/index.ts"],
+      "@org/akari-access/testing": ["./libs/akari-access/src/testing.ts"],
       "@org/auth": ["./libs/auth/src/index.ts"],
       "@org/auth/testing": ["./libs/auth/src/testing.ts"],
       "@org/chat": ["./libs/chat/src/index.ts"],
@@ -39,7 +41,11 @@
       "@org/supabase": ["./libs/supabase/src/index.ts"],
       "@org/gemini": ["./libs/gemini/src/index.ts"],
       "@org/firebase": ["./libs/firebase/src/index.ts"],
-      "@org/ai-assistant": ["./workflows/ai-assistant/src/index.ts"]
+      "@org/ai-assistant": ["./workflows/ai-assistant/src/index.ts"],
+      "@org/workflow-runtime": ["./workflows/runtime/src/index.ts"],
+      "@org/event-bus": ["./libs/event-bus/src/index.ts"],
+      "@org/event-bus/testing": ["./libs/event-bus/src/testing.ts"],
+      "@org/redis": ["./libs/redis/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp", "dist"]

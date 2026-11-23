@@ -56,6 +56,11 @@ describe('Plateforme HTTP (e2e)', () => {
     for (const path of ['/v2/objectives/{objectiveId}', '/v2/tasks/{taskId}']) {
       expect(Object.keys(document.paths[path].delete.responses)).toEqual(['204', '404']);
     }
+
+    // Le quota épuisé d'Akari : un code et ses détails, que les clients web et mobile gèrent.
+    const forbidden = document.paths['/v2/objectives/{objectiveId}/assistant/messages'].post.responses['403'];
+    expect(forbidden.description).toContain('AKARI_QUOTA_EXCEEDED');
+    expect(JSON.stringify(forbidden.content['application/json'].schema)).toContain('resetsAt');
   });
 
   it('sert la page /docs', async () => {

@@ -1,5 +1,5 @@
 import { IdGenerator } from '@org/chore';
-import { assign, fromPromise, setup } from 'xstate';
+import { assign, emit, fromPromise, setup } from 'xstate';
 import { SystemContextProvider } from '../context/system-context.provider';
 import {
   AI_SENDER_ID,
@@ -34,6 +34,19 @@ export type MachineDependencies = {
   /** Horloge des pannes, remplaçable dans les tests. */
   now?: () => Date;
 };
+
+/**
+ * Les faits que la machine annonce (`emit`), sans savoir qui écoute : le runtime les publie dans le bus
+ * sous `ai-assistant.<type>` (docs/adr/0010-runtime-des-workflows-et-bus-d-evenements.md).
+ */
+export type AssistantAnnouncement =
+  /**
+   * Akari a répondu, sa réponse est écrite. Un tour rejoué après un redémarrage peut l'annoncer de
+   * nouveau, avec le même `replyMessageId`.
+   */
+  | { type: 'turn.succeeded'; replyMessageId: string }
+  /** Une panne a arrêté le tour : son code, son étape, son message technique. */
+  | { type: 'turn.failed'; code: string; step: string; message: string; at: string };
 
 export type WorkflowEvent =
   | { type: 'message.send'; prompt: string; objectiveId: string; userId: string }
@@ -106,6 +119,7 @@ export const getMachine = (deps: MachineDependencies) => {
     types: {
       context: {} as WorkflowContext,
       events: {} as WorkflowEvent,
+      emitted: {} as AssistantAnnouncement,
     },
     actions: {
       recordActivity: assign({
@@ -113,6 +127,17 @@ export const getMachine = (deps: MachineDependencies) => {
           ...(context.activity ?? []),
           { step: params.step, at: now().toISOString() },
         ],
+      }),
+      /** Annoncer la panne que `failedTurn` vient de poser dans le contexte. */
+      announceFailure: emit(({ context }) => {
+        const error = context.lastError ?? toWorkflowError(new Error('Unknown failure'), 'unknown');
+        return {
+          type: 'turn.failed' as const,
+          code: error.code,
+          step: error.step,
+          message: error.message,
+          at: error.at,
+        };
       }),
     },
     actors: {
@@ -200,7 +225,10 @@ export const getMachine = (deps: MachineDependencies) => {
           },
           onError: {
             target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-            actions: assign(({ event }) => failedTurn(event.error, 'RegisteringUserMessageInConversation')),
+            actions: [
+              assign(({ event }) => failedTurn(event.error, 'RegisteringUserMessageInConversation')),
+              'announceFailure',
+            ],
           },
         },
       },
@@ -237,12 +265,15 @@ export const getMachine = (deps: MachineDependencies) => {
             },
             {
               target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-              actions: assign(() => failedTurn(new UnexpectedAIResponseError(), 'SendingPromptToAI')),
+              actions: [
+                assign(() => failedTurn(new UnexpectedAIResponseError(), 'SendingPromptToAI')),
+                'announceFailure',
+              ],
             },
           ],
           onError: {
             target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-            actions: assign(({ event }) => failedTurn(event.error, 'SendingPromptToAI')),
+            actions: [assign(({ event }) => failedTurn(event.error, 'SendingPromptToAI')), 'announceFailure'],
           },
         },
       },
@@ -264,17 +295,28 @@ export const getMachine = (deps: MachineDependencies) => {
           }),
           onDone: {
             target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-            actions: assign({
-              aiResponse: null,
-              toolCallResults: [],
-              currentToolCall: undefined,
-              pendingAIMessageId: undefined,
-              lastRegisteredMessage: ({ event }) => event.output.message ?? undefined,
-            }),
+            actions: [
+              // La réponse d'Akari est écrite : le tour a réussi. Annoncé avant que l'id réservé ne
+              // soit effacé, et repris tel quel si l'étape est rejouée après un redémarrage.
+              emit(({ context, event }) => ({
+                type: 'turn.succeeded' as const,
+                replyMessageId: event.output.message?.id ?? context.pendingAIMessageId ?? '',
+              })),
+              assign({
+                aiResponse: null,
+                toolCallResults: [],
+                currentToolCall: undefined,
+                pendingAIMessageId: undefined,
+                lastRegisteredMessage: ({ event }) => event.output.message ?? undefined,
+              }),
+            ],
           },
           onError: {
             target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-            actions: assign(({ event }) => failedTurn(event.error, 'RegisteringAIResponseInConversation')),
+            actions: [
+              assign(({ event }) => failedTurn(event.error, 'RegisteringAIResponseInConversation')),
+              'announceFailure',
+            ],
           },
         },
       },
@@ -460,12 +502,18 @@ export const getMachine = (deps: MachineDependencies) => {
             },
             {
               target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-              actions: assign(() => failedTurn(new UnexpectedAIResponseError(), 'SendingCallResultToAI')),
+              actions: [
+                assign(() => failedTurn(new UnexpectedAIResponseError(), 'SendingCallResultToAI')),
+                'announceFailure',
+              ],
             },
           ],
           onError: {
             target: WORKFLOW_READY_FOR_NEW_MESSAGE,
-            actions: assign(({ event }) => failedTurn(event.error, 'SendingCallResultToAI')),
+            actions: [
+              assign(({ event }) => failedTurn(event.error, 'SendingCallResultToAI')),
+              'announceFailure',
+            ],
           },
         },
         // Les résultats envoyés appartiennent à cette interaction : une nouvelle série d'outils
