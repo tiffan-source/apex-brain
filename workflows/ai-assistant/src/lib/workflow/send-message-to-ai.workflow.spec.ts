@@ -542,14 +542,11 @@ describe('SendMessageToAIWorkflow', () => {
   });
 
   describe('les annonces', () => {
+    /** Les faits annoncés par la machine, sans les changements d'état que le runtime publie aussi. */
     const announced = (harness: ReturnType<typeof createWorkflowHarness>) =>
-      harness.events.map(({ type, key, ownerId, audience, payload }) => ({
-        type,
-        key,
-        ownerId,
-        audience,
-        payload,
-      }));
+      harness.events
+        .filter(({ type }) => type !== 'ai-assistant.state.changed')
+        .map(({ type, key, ownerId, audience, payload }) => ({ type, key, ownerId, audience, payload }));
 
     it("annonce un tour réussi sous l'id de la réponse, une fois son état sauvegardé", async () => {
       const harness = createWorkflowHarness();
@@ -615,7 +612,7 @@ describe('SendMessageToAIWorkflow', () => {
       await workflow.sendMessage('o1', 'alice', 'Ajoute un pas');
       await waitForStatus(workflow, 'awaiting-permission');
       await harness.settle();
-      expect(harness.events).toEqual([]);
+      expect(announced(harness)).toEqual([]);
 
       await workflow.respondToPermission('o1', 'alice', true);
       await waitForStatus(workflow, 'ready');
@@ -643,7 +640,7 @@ describe('SendMessageToAIWorkflow', () => {
       await workflow.sendMessage('o1', 'alice', 'Une seule fois');
       await vi.waitFor(() => expect(chat.db.messages.size).toBe(2));
       await workflow.shutdown();
-      expect(harness.events).toEqual([]);
+      expect(announced(harness)).toEqual([]);
 
       const restarted = harness.restart();
       await restarted.getState('o1', 'alice');
@@ -658,6 +655,49 @@ describe('SendMessageToAIWorkflow', () => {
         }),
       ]);
       expect(done.lastRegisteredMessage?.id).toBe(reply?.id);
+    });
+  });
+
+  describe("l'état, publié pour les clients", () => {
+    it('publie après chaque transition l’état tel que les clients le lisent, chaque étape comprise', async () => {
+      const harness = createWorkflowHarness();
+      const { workflow, ai } = harness;
+      ai.willRespond(ai.text('Bonjour !'));
+
+      await workflow.sendMessage('o1', 'alice', 'Salut');
+      const done = await waitForStatus(workflow, 'ready');
+      await harness.settle();
+
+      const states = harness.events.filter(({ type }) => type === 'ai-assistant.state.changed');
+      expect(
+        states.every(
+          ({ audience, key, ownerId }) => audience === 'public' && key === 'o1' && ownerId === 'alice',
+        ),
+      ).toBe(true);
+      expect(
+        states.map(
+          ({ payload }) => (payload as { activity: { step: string } | null }).activity?.step ?? null,
+        ),
+      ).toEqual([null, 'saving-message', 'thinking', 'saving-reply', null]);
+      expect(states.at(-1)?.payload).toEqual(JSON.parse(JSON.stringify(done)));
+      // Le fait d'abord, puis l'état qu'il a produit.
+      expect(harness.events.slice(-2).map(({ type }) => type)).toEqual([
+        'ai-assistant.turn.succeeded',
+        'ai-assistant.state.changed',
+      ]);
+    });
+
+    it("ne montre jamais le message technique d'une panne", async () => {
+      const harness = createWorkflowHarness();
+      harness.ai.willRespond(new AIProviderError('clé secrète refusée'));
+
+      await harness.workflow.sendMessage('o1', 'alice', 'Tu es là ?');
+      await waitForStatus(harness.workflow, 'ready');
+      await harness.settle();
+
+      const publicEvents = harness.events.filter(({ audience }) => audience === 'public');
+      expect(publicEvents.at(-1)?.payload).toMatchObject({ lastError: { code: 'AI_PROVIDER_FAILURE' } });
+      expect(JSON.stringify(publicEvents)).not.toContain('clé secrète refusée');
     });
   });
 

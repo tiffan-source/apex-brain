@@ -220,6 +220,27 @@ describe('WorkflowRuntime', () => {
     ]);
   });
 
+  it("publie après chaque sauvegarde la vue publique de l'état, quand la définition en donne une", async () => {
+    const { runtime, step, bus, published } = createRuntime({
+      publicState: (snapshot, key) => ({ key, step: snapshot.value, done: snapshot.context.done }),
+    });
+    const instance = await runtime.obtain('k', 'alice', { create: true });
+
+    instance?.actor.send({ type: 'start', owner: 'alice' });
+    step.finishAll();
+    await vi.waitFor(() => expect(instance?.actor.getSnapshot().value).toBe('idle'));
+    await runtime.idle();
+    await bus.idle();
+
+    expect(published.map(({ type, audience, payload }) => ({ type, audience, payload }))).toEqual([
+      { type: 'counter.state.changed', audience: 'public', payload: { key: 'k', step: 'idle', done: 0 } },
+      { type: 'counter.state.changed', audience: 'public', payload: { key: 'k', step: 'working', done: 0 } },
+      { type: 'counter.counted', audience: 'public', payload: { done: 1 } },
+      { type: 'counter.audited', audience: 'internal', payload: { secret: 'détail technique' } },
+      { type: 'counter.state.changed', audience: 'public', payload: { key: 'k', step: 'idle', done: 1 } },
+    ]);
+  });
+
   it("ne publie un fait qu'après avoir sauvegardé l'état qui l'a produit", async () => {
     const { runtime, step, store, bus } = createRuntime();
     const order: string[] = [];

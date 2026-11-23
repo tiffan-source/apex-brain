@@ -276,6 +276,10 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
       return;
     }
 
+    // Les faits de la transition d'abord, puis l'état qu'ils ont produit, vu par les clients.
+    const stateChanged = this.stateChanged(tracked, snapshot);
+    if (stateChanged) events.push(stateChanged);
+
     // Copie figée au moment de la transition (les dates deviennent des chaînes, comme en base).
     const state = JSON.parse(
       JSON.stringify({
@@ -294,10 +298,41 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
       .then(() => this.publish(tracked.key, events));
   }
 
-  /** Un fait annoncé par la machine, dans son enveloppe : des données JSON, quel que soit le bus. */
+  /** Un fait annoncé par la machine, dans son enveloppe. */
   private toBusEvent(tracked: Tracked<TMachine>, emitted: { type: string }): BusEvent {
     const { type, ...payload } = emitted;
+    return this.envelope(
+      tracked,
+      type,
+      this.definition.publicEvents?.includes(type) ? 'public' : 'internal',
+      payload,
+    );
+  }
 
+  /** La vue publique de l'état, si la définition en donne une : `<nom>.state.changed`, public. */
+  private stateChanged(tracked: Tracked<TMachine>, snapshot: SnapshotFrom<TMachine>): BusEvent | undefined {
+    if (!this.definition.publicState) return undefined;
+
+    try {
+      return this.envelope(
+        tracked,
+        'state.changed',
+        'public',
+        this.definition.publicState(snapshot, tracked.key),
+      );
+    } catch (error) {
+      this.logger.error(`Workflow ${tracked.key}: the public state could not be built`, error);
+      return undefined;
+    }
+  }
+
+  /** L'enveloppe d'un événement : des données JSON, quel que soit le bus qui le transporte. */
+  private envelope(
+    tracked: Tracked<TMachine>,
+    type: string,
+    audience: BusEvent['audience'],
+    payload: unknown,
+  ): BusEvent {
     return JSON.parse(
       JSON.stringify({
         id: this.newEventId(),
@@ -305,7 +340,7 @@ export class WorkflowRuntime<TMachine extends AnyStateMachine> {
         source: this.definition.name,
         key: tracked.key,
         ownerId: tracked.ownerId,
-        audience: this.definition.publicEvents?.includes(type) ? 'public' : 'internal',
+        audience,
         occurredAt: this.now().toISOString(),
         payload,
       }),

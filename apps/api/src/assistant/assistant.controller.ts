@@ -1,13 +1,27 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiResponse, ApiTags } from '@nestjs/swagger';
+import type { MessageEvent } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Param,
+  Post,
+  Sse,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { SendMessageToAIWorkflow } from '@org/ai-assistant';
 import type { AuthenticatedUserOutput } from '@org/auth';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { openApiErrorSchema, openApiSchema } from '../http/openapi';
 import { unwrap } from '../http/result';
 import { idSchema } from '../http/schemas';
+import type { Observable } from 'rxjs';
 import { RateLimit } from '../rate-limit/rate-limit';
 import { AkariQuotaGuard } from './akari-quota.guard';
+import { AssistantEventStream } from './assistant-event-stream';
 import type { PermissionBody, SendMessageBody } from './assistant.schemas';
 import {
   permissionSchema,
@@ -20,7 +34,10 @@ import {
 @ApiBearerAuth()
 @Controller('objectives/:objectiveId/assistant')
 export class AssistantController {
-  constructor(@Inject(SendMessageToAIWorkflow) private readonly workflow: SendMessageToAIWorkflow) {}
+  constructor(
+    @Inject(SendMessageToAIWorkflow) private readonly workflow: SendMessageToAIWorkflow,
+    @Inject(AssistantEventStream) private readonly stream: AssistantEventStream,
+  ) {}
 
   /**
    * L'état du workflow (startWorkFlow + getState d'Apex) : un tour interrompu reprend, un workflow
@@ -34,6 +51,27 @@ export class AssistantController {
     @Param('objectiveId', { schema: idSchema }) objectiveId: string,
   ) {
     return unwrap(await this.workflow.getState(objectiveId, user.id));
+  }
+
+  /**
+   * Suivre l'assistant en direct (SSE) : `state.changed` (l'état, comme `GET …/assistant`) à l'ouverture
+   * puis après chaque transition, `turn.succeeded` quand Akari a répondu. Remplace l'interrogation chaque
+   * seconde, pas la lecture : à chaque reconnexion, le flux repart de l'état.
+   */
+  @Sse('events')
+  @ApiProduces('text/event-stream')
+  @ApiResponse({
+    status: 200,
+    description:
+      'Flux `text/event-stream` : `state.changed` (données : `WorkflowState`), `turn.succeeded` ' +
+      '(données : `{ replyMessageId }`), et un commentaire `ping` régulier',
+  })
+  @ApiResponse({ status: 404, description: 'CONVERSATION_NOT_FOUND', schema: openApiErrorSchema() })
+  events(
+    @CurrentUser() user: AuthenticatedUserOutput,
+    @Param('objectiveId', { schema: idSchema }) objectiveId: string,
+  ): Promise<Observable<MessageEvent>> {
+    return this.stream.open(objectiveId, user.id);
   }
 
   /**

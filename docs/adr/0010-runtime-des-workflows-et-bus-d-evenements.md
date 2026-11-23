@@ -32,7 +32,9 @@ machine. Et les clients interrogent l'état chaque seconde pour suivre un tour.
    (`ai-assistant.turn.succeeded`), la journalisation des pannes (`ai-assistant.turn.failed`).
 4. **Les clients suivent leurs événements par un flux SSE** : l'état au départ, puis les événements
    publics de la personne. Le flux remplace l'interrogation chaque seconde, pas la lecture de l'état :
-   à chaque connexion, le client repart de l'état.
+   à chaque connexion, le client repart de l'état. Pour que le flux porte l'état, le runtime publie
+   aussi, après chaque sauvegarde, la vue publique que donne la définition (`publicState`) : un
+   événement public `<nom>.state.changed`, la même vue que la lecture de l'état.
 5. **Deux implémentations du bus**, choisies par la configuration : en mémoire quand l'API n'a
    qu'une instance, Redis (pub/sub) dès qu'elle en a plusieurs.
 

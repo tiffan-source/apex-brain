@@ -26,6 +26,7 @@ import { WorkflowRuntime, WorkflowStateStore } from '@org/workflow-runtime';
 import type { Environment } from '../config/environment';
 import { APP_ENVIRONMENT } from '../config/environment';
 import { AkariQuotaGuard } from './akari-quota.guard';
+import { AssistantEventStream } from './assistant-event-stream';
 import { AssistantController } from './assistant.controller';
 import { AssistantSubscribers } from './assistant.subscribers';
 
@@ -58,6 +59,7 @@ const assistantLogger: WorkflowLogger = {
     },
     AkariQuotaGuard,
     AssistantSubscribers,
+    AssistantEventStream,
     {
       provide: ObjectiveInternalService,
       useFactory: (repository: ObjectiveRepository, ids: IdGenerator) =>

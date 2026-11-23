@@ -26,4 +26,9 @@ export type WorkflowDefinition<TMachine extends AnyStateMachine> = {
    * serveur (`audience: 'internal'`).
    */
   publicEvents?: readonly string[];
+  /**
+   * La vue publique de l'état, celle que lisent les clients. Donnée, le runtime publie après chaque
+   * sauvegarde un événement public `<nom>.state.changed` qui la porte.
+   */
+  publicState?: (snapshot: SnapshotFrom<TMachine>, key: string) => unknown;
 };

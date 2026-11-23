@@ -136,6 +136,7 @@ l'infrastructure implémente directement.
 |---|---|---|---|
 | `GET /v2/objectives/{objectiveId}/conversation` | `GetConversationsQuery` | — | `200 { id, messages: [{ id, sender, content, createdAt }] }` |
 | `GET /v2/objectives/{objectiveId}/assistant` | `startWorkFlow` + `getState` | — | `200 WorkflowState` |
+| `GET /v2/objectives/{objectiveId}/assistant/events` | suivre l'assistant en direct (SSE, voir plus bas) | — | `200 text/event-stream` |
 | `POST /v2/objectives/{objectiveId}/assistant/messages` | `sendMessage` (rôles `standard`, `premium`, `admin`) | `{ message }` | `202 WorkflowState` |
 | `POST /v2/objectives/{objectiveId}/assistant/permission` | `respondToPermission` | `{ granted, toolCallId? }` | `202 WorkflowState` |
 
@@ -209,15 +210,39 @@ Un tour se déroule ainsi :
 
 1. `POST …/assistant/messages` → `202`, `status: processing`. Un message pendant un tour en cours
    répond `409 WORKFLOW_BUSY`.
-2. Le client interroge `GET …/assistant` (Apex : chaque seconde) jusqu'à `ready` ou
-   `awaiting-permission`. `activity` dit ce que fait Akari, `lastRegisteredMessage` donne le message
-   enregistré à afficher.
+2. Le client suit le flux `GET …/assistant/events` (ou interroge `GET …/assistant`, comme Apex
+   chaque seconde) jusqu'à `ready` ou `awaiting-permission`. `activity` dit ce que fait Akari,
+   `lastRegisteredMessage` donne le message enregistré à afficher.
 3. Si Akari veut ajouter une étape (`createSubObjective`) ou un pas (`createTask`) :
    `status: awaiting-permission`, `pendingToolCall` décrit la proposition. Le client répond par
    `POST …/assistant/permission` avec `granted` et le `toolCallId` reçu, puis reprend
    l'interrogation. Après un ajout accepté, recharger `GET /v2/bff/objective-tree`.
 4. Une panne (IA indisponible…) ramène à `ready` avec `lastError` : le message de la personne est
    enregistré, elle peut réessayer. `lastError` disparaît au message suivant.
+
+### Suivre l'assistant en direct (SSE)
+
+`GET /v2/objectives/{objectiveId}/assistant/events` ouvre un flux `text/event-stream` pour la
+propriétaire de l'objectif, authentifiée comme sur toute route (`Authorization: Bearer`)
+([ADR 0010](./adr/0010-runtime-des-workflows-et-bus-d-evenements.md)) :
+
+| `event` | Quand | `data` |
+|---|---|---|
+| `state.changed` | à l'ouverture, puis après chaque transition | `WorkflowState`, comme `GET …/assistant` |
+| `turn.succeeded` | Akari a répondu, sa réponse est écrite | `{ replyMessageId }` |
+
+- Chaque événement a un `id`. Un commentaire `: ping` part toutes les 25 secondes. Un même état peut
+  arriver deux fois à l'ouverture.
+- Le flux ne porte que les événements publics de cet objectif : jamais ceux d'une autre personne,
+  ni le détail technique d'une panne (`lastError` reste `{ code, step, at }`).
+- Refusé avant tout flux, en JSON : `401` sans jeton, `404 CONVERSATION_NOT_FOUND` pour l'objectif
+  d'une autre personne, ou sans conversation.
+- Le flux remplace l'interrogation chaque seconde, pas la lecture. Il se ferme (durée maximale d'une
+  fonction, proxy, réseau) : le client se reconnecte après `retry` (3 s) et repart de l'état que le
+  flux renvoie à l'ouverture.
+- L'`EventSource` des navigateurs n'envoie pas d'en-tête `Authorization`, et React Native n'en a pas :
+  il faut un client SSE qui accepte des en-têtes (à base de `fetch` sur le web, une bibliothèque sur
+  mobile).
 
 ## Passer le client web d'Apex à l'API
 

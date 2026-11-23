@@ -198,8 +198,9 @@ describe('Conversation et assistant (e2e)', () => {
       await t.settle();
       logged.mockRestore();
 
+      const turns = published.filter(({ type }) => type.startsWith('ai-assistant.turn.'));
       expect(
-        published.map(({ type, source, key, ownerId, audience }) => ({
+        turns.map(({ type, source, key, ownerId, audience }) => ({
           type,
           source,
           key,
@@ -222,8 +223,8 @@ describe('Conversation et assistant (e2e)', () => {
           audience: 'public',
         },
       ]);
-      expect(published[1].payload).toEqual({ replyMessageId: done.lastRegisteredMessage?.id });
-      expect(new Set(published.map(({ id }) => id)).size).toBe(2);
+      expect(turns[1].payload).toEqual({ replyMessageId: done.lastRegisteredMessage?.id });
+      expect(new Set(published.map(({ id }) => id)).size).toBe(published.length);
     });
   });
 

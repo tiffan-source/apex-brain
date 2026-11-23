@@ -7,7 +7,7 @@ import {
   initialWorkflowContext,
   MachineDependencies,
 } from './machine';
-import { isRestingValue } from './workflow-state.view';
+import { isRestingValue, toWorkflowStateView } from './workflow-state.view';
 
 /** Le nom du workflow de l'assistant, pour le runtime. */
 export const AI_ASSISTANT_WORKFLOW = 'ai-assistant';
@@ -18,6 +18,8 @@ export const AI_ASSISTANT_EVENTS = {
   turnSucceeded: `${AI_ASSISTANT_WORKFLOW}.turn.succeeded`,
   /** Une panne a arrêté le tour. Interne : il porte le message technique, `{ code, step, message, at }`. */
   turnFailed: `${AI_ASSISTANT_WORKFLOW}.turn.failed`,
+  /** L'état a changé. Public : l'état tel que `GET …/assistant` le rend (`WorkflowStateView`). */
+  stateChanged: `${AI_ASSISTANT_WORKFLOW}.state.changed`,
 } as const;
 
 /** La charge d'un événement de l'assistant, d'après son annonce. */
@@ -38,6 +40,13 @@ export function aiAssistantWorkflow(deps: MachineDependencies): WorkflowDefiniti
     name: AI_ASSISTANT_WORKFLOW,
     machine,
     publicEvents: ['turn.succeeded'],
+    // Après chaque transition, l'état tel que les clients le lisent : le flux SSE le leur porte.
+    publicState: (snapshot, key) =>
+      toWorkflowStateView(
+        key,
+        { value: snapshot.value as WorkflowStateValue, context: snapshot.context },
+        deps.now?.() ?? new Date(),
+      ),
     ownerOf: (state) => state.context?.userId || undefined,
     isResting: (snapshot) => isRestingValue(snapshot.value as WorkflowStateValue),
     // Document d'Apex (valeur + contexte), ou snapshot inutilisable. Un état au repos se reprend tel quel ;

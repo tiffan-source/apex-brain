@@ -99,8 +99,10 @@ domaine, rien hors du dossier `bff/` ne les lit.
   son type (`ai-assistant.turn.succeeded`), sa source, sa clé, son propriétaire, son `audience`
   (`public`, vers le client de la personne ; `internal`, jamais hors du serveur) et sa charge. Les
   réactions de l'API sont des abonnés (`apps/api/src/assistant/assistant.subscribers.ts` : le
-  comptage d'usage d'Akari, la journalisation des pannes de tour). Au plus une fois : un fait peut se
-  perdre si le serveur tombe entre la sauvegarde et la publication.
+  comptage d'usage d'Akari, la journalisation des pannes de tour), et le flux SSE des clients en est
+  un aussi (`assistant-event-stream.ts` : les événements publics d'un objectif, pour sa
+  propriétaire). Au plus une fois : un fait peut se perdre si le serveur tombe entre la sauvegarde et
+  la publication.
 - **Racine de composition** : `apps/api/src/adapters/production-adapters.module.ts` (ports →
   adaptateurs) et `apps/api/src/<contexte>/<contexte>.module.ts` (cas d'usage ← ports).
 - **Contrat HTTP** : `apps/api/src/<contexte>/*.schemas.ts` (zod) ; les mêmes schémas valident
