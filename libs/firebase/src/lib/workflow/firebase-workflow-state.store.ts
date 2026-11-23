@@ -1,9 +1,5 @@
-import type {
-  IWorkflowStateRepository,
-  WorkflowContext,
-  WorkflowState,
-  WorkflowStateValue,
-} from '@org/ai-assistant';
+import type { WorkflowContext, WorkflowState, WorkflowStateValue } from '@org/ai-assistant';
+import type { WorkflowStateStore } from '@org/workflow-runtime';
 
 const COLLECTION = 'workflow-states';
 
@@ -36,7 +32,8 @@ export interface DocumentStore {
   };
 }
 
-export class FirebaseWorkflowStateRepository implements IWorkflowStateRepository {
+/** Le stockage des états de l'assistant dans Firestore, pour le runtime des workflows. */
+export class FirebaseWorkflowStateStore implements WorkflowStateStore<WorkflowContext, WorkflowStateValue> {
   constructor(private readonly firebase: { db: DocumentStore }) {}
 
   async save(state: WorkflowState): Promise<void> {

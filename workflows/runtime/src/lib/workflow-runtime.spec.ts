@@ -1,0 +1,192 @@
+import { assign, fromPromise, setup } from 'xstate';
+import { WorkflowOwnerMismatchError } from './errors/workflow-owner-mismatch.error';
+import { InMemoryWorkflowStateStore } from './memory/in-memory-workflow-state-store';
+import { WorkflowDefinition } from './workflow-definition';
+import { WorkflowLogger, WorkflowRuntime, WorkflowRuntimeOptions } from './workflow-runtime';
+
+type Context = { owner: string; done: number };
+
+/** Une étape lente, que le test termine quand il veut. */
+function slowStep() {
+  const pending: Array<() => void> = [];
+  const step = {
+    started: 0,
+    run: () => {
+      step.started += 1;
+      return new Promise<void>((resolve) => pending.push(resolve));
+    },
+    finishAll: () => pending.splice(0).forEach((resolve) => resolve()),
+  };
+  return step;
+}
+
+/** Une machine minimale : au repos, puis une étape invoquée, puis de nouveau au repos. */
+function counterMachine(step: ReturnType<typeof slowStep>) {
+  return setup({
+    types: {
+      context: {} as Context,
+      events: {} as { type: 'start'; owner: string },
+    },
+    actors: {
+      work: fromPromise<void>(() => step.run()),
+    },
+  }).createMachine({
+    id: 'counter',
+    initial: 'idle',
+    context: { owner: '', done: 0 },
+    states: {
+      idle: {
+        on: { start: { target: 'working', actions: assign({ owner: ({ event }) => event.owner }) } },
+      },
+      working: {
+        invoke: {
+          src: 'work',
+          onDone: { target: 'idle', actions: assign({ done: ({ context }) => context.done + 1 }) },
+        },
+      },
+    },
+  });
+}
+
+type CounterMachine = ReturnType<typeof counterMachine>;
+
+const logger: WorkflowLogger & { errors: unknown[] } = {
+  errors: [],
+  error(_message, error) {
+    this.errors.push(error);
+  },
+  warn() {
+    /* rien */
+  },
+};
+
+function createRuntime(definition: Partial<WorkflowDefinition<CounterMachine>> = {}) {
+  const step = slowStep();
+  const machine = counterMachine(step);
+  const store = new InMemoryWorkflowStateStore<Context>();
+  const build = (options: WorkflowRuntimeOptions = {}) =>
+    new WorkflowRuntime<CounterMachine>(
+      { name: 'counter', machine, ownerOf: (state) => state.context.owner || undefined, ...definition },
+      store,
+      { logger, ...options },
+    );
+
+  return { runtime: build(), restart: build, store, step, machine };
+}
+
+describe('WorkflowRuntime', () => {
+  beforeEach(() => {
+    logger.errors.length = 0;
+  });
+
+  it("ne crée une instance que sur demande, et sauvegarde dès qu'elle existe", async () => {
+    const { runtime, store } = createRuntime();
+
+    await expect(runtime.obtain('k', 'alice', { create: false })).resolves.toBeNull();
+    expect(store.saves).toBe(0);
+
+    const instance = await runtime.obtain('k', 'alice', { create: true });
+    expect(instance).toMatchObject({ key: 'k', ownerId: 'alice' });
+    expect(runtime.activeCount).toBe(1);
+
+    await runtime.shutdown();
+    await expect(store.findById('k')).resolves.toMatchObject({ id: 'k', value: 'idle' });
+    expect(runtime.activeCount).toBe(0);
+  });
+
+  it("relance après un redémarrage l'étape qui était en cours", async () => {
+    const { runtime, restart, store, step } = createRuntime();
+    const instance = await runtime.obtain('k', 'alice', { create: true });
+
+    instance?.actor.send({ type: 'start', owner: 'alice' });
+    expect(step.started).toBe(1);
+    await runtime.shutdown();
+    await expect(store.findById('k')).resolves.toMatchObject({ value: 'working' });
+
+    const restored = await restart().obtain('k', 'alice', { create: false });
+    expect(step.started).toBe(2);
+
+    step.finishAll();
+    await vi.waitFor(() => expect(restored?.actor.getSnapshot().value).toBe('idle'));
+    expect(restored?.actor.getSnapshot().context.done).toBe(1);
+  });
+
+  it("refuse de rendre l'état stocké de quelqu'un d'autre", async () => {
+    const { runtime, restart, step } = createRuntime();
+    const instance = await runtime.obtain('k', 'alice', { create: true });
+    instance?.actor.send({ type: 'start', owner: 'alice' });
+    step.finishAll();
+    await vi.waitFor(() => expect(instance?.actor.getSnapshot().value).toBe('idle'));
+    await runtime.shutdown();
+
+    await expect(restart().obtain('k', 'mallory', { create: true })).rejects.toBeInstanceOf(
+      WorkflowOwnerMismatchError,
+    );
+  });
+
+  it("rebâtit l'instance avec la définition quand l'état stocké n'a pas de snapshot XState", async () => {
+    const withRecover = createRuntime({
+      recover: (state) => withRecover.machine.resolveState({ value: 'idle', context: state.context }),
+    });
+    await withRecover.store.overwrite({ id: 'k', value: 'idle', context: { owner: 'alice', done: 7 } });
+
+    const recovered = await withRecover.runtime.obtain('k', 'alice', { create: false });
+    expect(recovered?.actor.getSnapshot().context.done).toBe(7);
+
+    // Sans `recover`, l'instance repart de l'état initial.
+    const plain = createRuntime();
+    await plain.store.overwrite({ id: 'k', value: 'idle', context: { owner: 'alice', done: 7 } });
+    const fresh = await plain.runtime.obtain('k', 'alice', { create: false });
+    expect(fresh?.actor.getSnapshot().context.done).toBe(0);
+  });
+
+  it("libère la mémoire des instances au repos, jamais d'une instance en pleine étape", async () => {
+    const { restart, step } = createRuntime();
+    const runtime = restart({ idleTimeoutMs: 1000 });
+    await runtime.obtain('resting', 'alice', { create: true });
+    const busy = await runtime.obtain('busy', 'alice', { create: true });
+    busy?.actor.send({ type: 'start', owner: 'alice' });
+
+    await expect(runtime.evictIdle(Date.now())).resolves.toEqual([]);
+    await expect(runtime.evictIdle(Date.now() + 5000)).resolves.toEqual(['resting']);
+    expect(runtime.peek('busy')).toBeDefined();
+    expect(runtime.peek('resting')).toBeUndefined();
+
+    step.finishAll();
+    await runtime.shutdown();
+  });
+
+  it("oublie une instance : plus d'acteur, plus d'état stocké", async () => {
+    const { runtime, store } = createRuntime();
+    await runtime.obtain('k', 'alice', { create: true });
+
+    await runtime.forget('k');
+
+    expect(runtime.peek('k')).toBeUndefined();
+    await expect(store.findById('k')).resolves.toBeNull();
+  });
+
+  it('montre chaque transition aux observateurs, et isole celui qui lance', async () => {
+    const { runtime, store, step } = createRuntime();
+    const seen: Array<[unknown, unknown]> = [];
+    const failure = new Error('observateur en panne');
+    runtime.onSnapshot(() => {
+      throw failure;
+    });
+    runtime.onSnapshot(({ snapshot, previous }) => seen.push([previous.value, snapshot.value]));
+
+    const instance = await runtime.obtain('k', 'alice', { create: true });
+    instance?.actor.send({ type: 'start', owner: 'alice' });
+    step.finishAll();
+    await vi.waitFor(() => expect(instance?.actor.getSnapshot().value).toBe('idle'));
+    await runtime.shutdown();
+
+    expect(seen).toEqual([
+      ['idle', 'idle'],
+      ['idle', 'working'],
+      ['working', 'idle'],
+    ]);
+    expect(logger.errors).toEqual([failure, failure, failure]);
+    await expect(store.findById('k')).resolves.toMatchObject({ value: 'idle', context: { done: 1 } });
+  });
+});

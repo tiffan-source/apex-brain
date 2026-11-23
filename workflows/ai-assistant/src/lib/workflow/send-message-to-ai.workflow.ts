@@ -1,51 +1,30 @@
 import { ConversationNotFoundError } from '@org/chat';
 import { Result, runWithResult } from '@org/chore';
-import { Actor, createActor, InspectionEvent, Observer, Snapshot, Subscription } from 'xstate';
+import type { WorkflowInstance, WorkflowLogger, WorkflowRuntime } from '@org/workflow-runtime';
+import { WorkflowOwnerMismatchError } from '@org/workflow-runtime';
 import { NoPendingPermissionError } from '../errors/no-pending-permission.error';
 import { WorkflowBusyError } from '../errors/workflow-busy.error';
-import {
-  IWorkflowStateRepository,
-  WORKFLOW_READY_FOR_NEW_MESSAGE,
-  WorkflowContext,
-  WorkflowState,
-  WorkflowStateValue,
-} from '../model/workflow.model';
-import { ConversationMachine, getMachine, initialWorkflowContext, MachineDependencies } from './machine';
+import { WORKFLOW_READY_FOR_NEW_MESSAGE, WorkflowStateValue } from '../model/workflow.model';
+import { IChatActor } from './actors.protocols';
+import { ConversationMachine } from './machine';
 import {
   initialWorkflowStateView,
   isAwaitingPermission,
-  isRestingValue,
   toWorkflowStateView,
   WorkflowStateView,
 } from './workflow-state.view';
 
-export type SendMessageToAIWorkflowDependencies = MachineDependencies & {
-  workflowStateRepository: IWorkflowStateRepository;
-};
-
-export interface WorkflowLogger {
-  error(message: string, error?: unknown): void;
-  warn(message: string): void;
-}
-
-export type SendMessageToAIWorkflowOptions = {
-  /** Après ce délai sans activité, un workflow au repos quitte la mémoire (il reste persisté). Défaut : 30 min. */
-  idleTimeoutMs?: number;
-  /** Observateur d'inspection XState (désactivé par défaut). */
-  inspect?: Observer<InspectionEvent> | ((event: InspectionEvent) => void);
+export type SendMessageToAIWorkflowDependencies = {
+  /** Les instances de la machine de l'assistant (`aiAssistantWorkflow`), hébergées par le runtime. */
+  runtime: WorkflowRuntime<ConversationMachine>;
+  /** Pour vérifier qu'une conversation appartient à la personne. */
+  chatService: IChatActor;
+  /** L'horloge de l'état rendu aux clients, remplaçable dans les tests. */
+  now?: () => Date;
   logger?: WorkflowLogger;
 };
 
-type TrackedWorkflow = {
-  actor: Actor<ConversationMachine>;
-  ownerId: string;
-  lastActivity: number;
-  /** Les sauvegardes partent l'une après l'autre : une ancienne n'écrase jamais une plus récente. */
-  persisting: Promise<void>;
-  subscription?: Subscription;
-};
-
-const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+type AssistantInstance = WorkflowInstance<ConversationMachine>;
 
 const consoleLogger: WorkflowLogger = {
   error: (message, error) => console.error(message, error),
@@ -53,26 +32,28 @@ const consoleLogger: WorkflowLogger = {
 };
 
 /**
- * Le workflow « envoyer un message à l'IA », un acteur XState par objectif.
+ * Le workflow « envoyer un message à l'IA » : les règles d'une requête, une instance de la machine par
+ * objectif.
  *
- * Chaque méthode vérifie d'abord que la conversation de l'objectif appartient à la personne, puis
- * reprend l'acteur en mémoire, le restaure depuis son état persisté, ou le crée. Chaque transition
- * est persistée ; restaurer un snapshot relance l'étape qui était en cours.
+ * Chaque méthode vérifie d'abord que la conversation de l'objectif appartient à la personne, puis demande au
+ * runtime l'instance de l'objectif : en mémoire, restaurée depuis son état persisté, ou créée. Le runtime
+ * héberge les acteurs et persiste chaque transition ; restaurer un snapshot relance l'étape qui était en cours.
  */
 export class SendMessageToAIWorkflow {
-  private readonly machine: ConversationMachine;
-  private readonly workflows = new Map<string, TrackedWorkflow>();
-  private readonly locks = new Map<string, Promise<void>>();
+  private readonly runtime: WorkflowRuntime<ConversationMachine>;
   private readonly logger: WorkflowLogger;
-  private readonly idleTimeoutMs: number;
 
-  constructor(
-    private readonly deps: SendMessageToAIWorkflowDependencies,
-    private readonly options: SendMessageToAIWorkflowOptions = {},
-  ) {
-    this.logger = options.logger ?? consoleLogger;
-    this.machine = getMachine({ ...deps, onTurnSucceeded: this.reportTurnSucceeded(deps.onTurnSucceeded) });
-    this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+  constructor(private readonly deps: SendMessageToAIWorkflowDependencies) {
+    this.runtime = deps.runtime;
+    this.logger = deps.logger ?? consoleLogger;
+
+    // Une panne de tour (IA, base…) n'arrête pas le workflow : on la journalise ici, avec son détail.
+    this.runtime.onSnapshot(({ instance, snapshot, previous }) => {
+      const error = snapshot.context.lastError;
+      if (error && error.at !== previous.context.lastError?.at) {
+        this.logger.error(`Workflow ${instance.key}: ${error.code} during ${error.step}: ${error.message}`);
+      }
+    });
   }
 
   /**
@@ -83,8 +64,8 @@ export class SendMessageToAIWorkflow {
     return runWithResult(
       async () => {
         await this.authorize(objectiveId, ownerId);
-        const tracked = await this.obtain(objectiveId, ownerId, false);
-        return tracked ? this.view(objectiveId, tracked) : initialWorkflowStateView(objectiveId);
+        const instance = await this.obtain(objectiveId, ownerId, false);
+        return instance ? this.view(objectiveId, instance) : initialWorkflowStateView(objectiveId);
       },
       [ConversationNotFoundError],
       'Failed to read the workflow state',
@@ -108,14 +89,14 @@ export class SendMessageToAIWorkflow {
     return runWithResult(
       async () => {
         await this.authorize(objectiveId, ownerId);
-        const tracked = await this.require(objectiveId, ownerId);
+        const instance = await this.require(objectiveId, ownerId);
 
-        if (tracked.actor.getSnapshot().value !== WORKFLOW_READY_FOR_NEW_MESSAGE) {
+        if (instance.actor.getSnapshot().value !== WORKFLOW_READY_FOR_NEW_MESSAGE) {
           throw new WorkflowBusyError(objectiveId);
         }
 
-        tracked.actor.send({ type: 'message.send', userId: ownerId, objectiveId, prompt: message });
-        return this.view(objectiveId, tracked);
+        instance.actor.send({ type: 'message.send', userId: ownerId, objectiveId, prompt: message });
+        return this.view(objectiveId, instance);
       },
       [ConversationNotFoundError, WorkflowBusyError],
       'Failed to send the message',
@@ -139,11 +120,11 @@ export class SendMessageToAIWorkflow {
     return runWithResult(
       async () => {
         await this.authorize(objectiveId, ownerId);
-        const tracked = await this.obtain(objectiveId, ownerId, false);
-        const snapshot = tracked?.actor.getSnapshot();
+        const instance = await this.obtain(objectiveId, ownerId, false);
+        const snapshot = instance?.actor.getSnapshot();
 
         if (
-          !tracked ||
+          !instance ||
           !snapshot ||
           !isAwaitingPermission(snapshot.value as WorkflowStateValue) ||
           (toolCallId !== undefined && snapshot.context.currentToolCall?.id !== toolCallId)
@@ -151,8 +132,8 @@ export class SendMessageToAIWorkflow {
           throw new NoPendingPermissionError(objectiveId);
         }
 
-        tracked.actor.send({ type: 'user.response', permission });
-        return this.view(objectiveId, tracked);
+        instance.actor.send({ type: 'user.response', permission });
+        return this.view(objectiveId, instance);
       },
       [ConversationNotFoundError, NoPendingPermissionError],
       'Failed to answer the permission request',
@@ -168,66 +149,32 @@ export class SendMessageToAIWorkflow {
    * remonter : l'objectif est déjà supprimé, et sans conversation cet état ne sera plus jamais lu.
    */
   forget(objectiveId: string): Promise<void> {
-    return this.withLock(objectiveId, async () => {
-      const tracked = this.workflows.get(objectiveId);
-
-      if (tracked) {
-        // Dans cet ordre : plus aucune transition n'est sauvegardée, puis on attend celles qui
-        // sont parties. Aucune écriture ne peut ainsi recréer l'état après sa suppression.
-        this.workflows.delete(objectiveId);
-        tracked.subscription?.unsubscribe();
-        tracked.actor.stop();
-        await tracked.persisting;
-      }
-
-      try {
-        await this.deps.workflowStateRepository.delete(objectiveId);
-      } catch (error) {
-        this.logger.error(`Workflow ${objectiveId}: the persisted state could not be deleted`, error);
-      }
-    });
+    return this.runtime.forget(objectiveId);
   }
 
   /**
    * Libérer la mémoire des workflows au repos depuis plus que le délai d'inactivité. Ils restent
    * persistés et seront restaurés au prochain accès. Rend les ids libérés.
    */
-  async evictIdle(now = Date.now()): Promise<string[]> {
-    const evicted: string[] = [];
-
-    for (const objectiveId of [...this.workflows.keys()]) {
-      await this.withLock(objectiveId, async () => {
-        const tracked = this.workflows.get(objectiveId);
-        if (!tracked) return;
-
-        const value = tracked.actor.getSnapshot().value as WorkflowStateValue;
-        if (!isRestingValue(value) || now - tracked.lastActivity < this.idleTimeoutMs) return;
-
-        await this.release(objectiveId, tracked);
-        evicted.push(objectiveId);
-      });
-    }
-
-    return evicted;
+  evictIdle(now = Date.now()): Promise<string[]> {
+    return this.runtime.evictIdle(now);
   }
 
   /** Attendre les sauvegardes en cours puis arrêter tous les acteurs (arrêt du serveur). */
-  async shutdown(): Promise<void> {
-    for (const [objectiveId, tracked] of [...this.workflows]) {
-      await this.withLock(objectiveId, () => this.release(objectiveId, tracked));
-    }
+  shutdown(): Promise<void> {
+    return this.runtime.shutdown();
   }
 
   /** Le nombre de workflows en mémoire. */
   get activeWorkflowCount(): number {
-    return this.workflows.size;
+    return this.runtime.activeCount;
   }
 
   private async authorize(objectiveId: string, ownerId: string): Promise<void> {
-    const tracked = this.workflows.get(objectiveId);
+    const instance = this.runtime.peek(objectiveId);
 
-    if (tracked) {
-      if (tracked.ownerId !== ownerId) throw new ConversationNotFoundError(objectiveId);
+    if (instance) {
+      if (instance.ownerId !== ownerId) throw new ConversationNotFoundError(objectiveId);
       return;
     }
 
@@ -236,142 +183,23 @@ export class SendMessageToAIWorkflow {
     }
   }
 
-  private async require(objectiveId: string, ownerId: string): Promise<TrackedWorkflow> {
-    return (await this.obtain(objectiveId, ownerId, true)) as TrackedWorkflow;
+  private async require(objectiveId: string, ownerId: string): Promise<AssistantInstance> {
+    return (await this.obtain(objectiveId, ownerId, true)) as AssistantInstance;
   }
 
-  /** L'acteur en mémoire, sinon restauré, sinon (si `create`) un nouvel acteur. */
-  private obtain(objectiveId: string, ownerId: string, create: boolean): Promise<TrackedWorkflow | null> {
-    return this.withLock(objectiveId, async () => {
-      const tracked = this.workflows.get(objectiveId);
-
-      if (tracked && tracked.actor.getSnapshot().status === 'active') {
-        tracked.lastActivity = Date.now();
-        return tracked;
-      }
-
-      if (tracked) {
-        // Acteur arrêté par une erreur inattendue : on repart de son dernier état persisté.
-        await this.release(objectiveId, tracked);
-      }
-
-      const state = await this.deps.workflowStateRepository.findById(objectiveId);
-
-      if (state) {
-        if (state.context?.userId && state.context.userId !== ownerId) {
-          throw new ConversationNotFoundError(objectiveId);
-        }
-        return this.startRestored(objectiveId, ownerId, state);
-      }
-
-      return create ? this.track(objectiveId, ownerId, createActor(this.machine, this.actorOptions())) : null;
-    });
-  }
-
-  private startRestored(objectiveId: string, ownerId: string, state: WorkflowState): TrackedWorkflow {
-    const persisted = state.persistedSnapshot as Snapshot<unknown> | undefined;
-
-    if (persisted && persisted.status === 'active') {
-      try {
-        return this.track(
-          objectiveId,
-          ownerId,
-          createActor(this.machine, { ...this.actorOptions(), snapshot: persisted as never }),
-        );
-      } catch (error) {
-        this.logger.error(`Workflow ${objectiveId}: the persisted snapshot could not be restored`, error);
-      }
+  /** L'instance en mémoire, sinon restaurée, sinon (si `create`) une nouvelle instance. */
+  private async obtain(objectiveId: string, ownerId: string, create: boolean): Promise<AssistantInstance | null> {
+    try {
+      return await this.runtime.obtain(objectiveId, ownerId, { create });
+    } catch (error) {
+      // L'état persisté appartient à quelqu'un d'autre : pour cette personne, il n'y a pas de conversation.
+      if (error instanceof WorkflowOwnerMismatchError) throw new ConversationNotFoundError(objectiveId);
+      throw error;
     }
-
-    // Document d'Apex (valeur + contexte), ou snapshot inutilisable. Un état au repos se reprend
-    // tel quel ; un tour qui était en cours ne peut pas être relancé : on revient au repos et on le dit.
-    const resting = isRestingValue(state.value);
-    const context: WorkflowContext = { ...initialWorkflowContext(), ...state.context };
-    const snapshot = this.machine.resolveState({
-      value: resting ? state.value : WORKFLOW_READY_FOR_NEW_MESSAGE,
-      context: resting
-        ? context
-        : {
-            ...context,
-            aiResponse: null,
-            toolCallResults: [],
-            currentToolCall: undefined,
-            activity: [],
-            lastError: {
-              code: 'TURN_INTERRUPTED',
-              message: 'The turn was interrupted and could not be resumed',
-              step: typeof state.value === 'string' ? state.value : JSON.stringify(state.value),
-              at: new Date().toISOString(),
-            },
-          },
-    });
-
-    return this.track(objectiveId, ownerId, createActor(this.machine, { ...this.actorOptions(), snapshot }));
   }
 
-  private track(objectiveId: string, ownerId: string, actor: Actor<ConversationMachine>): TrackedWorkflow {
-    const tracked: TrackedWorkflow = {
-      actor,
-      ownerId,
-      lastActivity: Date.now(),
-      persisting: Promise.resolve(),
-    };
-
-    let lastReportedError = actor.getSnapshot().context.lastError?.at;
-
-    tracked.subscription = actor.subscribe({
-      next: (snapshot) => {
-        tracked.lastActivity = Date.now();
-
-        // Une panne de tour (IA, base…) n'arrête pas le workflow : on la journalise ici, avec son détail.
-        const error = snapshot.context.lastError;
-        if (error && error.at !== lastReportedError) {
-          lastReportedError = error.at;
-          this.logger.error(`Workflow ${objectiveId}: ${error.code} during ${error.step}: ${error.message}`);
-        }
-
-        this.schedulePersist(objectiveId, tracked, snapshot);
-      },
-      error: (error) => this.logger.error(`Workflow ${objectiveId} stopped on an unexpected error`, error),
-    });
-
-    actor.start();
-    this.workflows.set(objectiveId, tracked);
-    return tracked;
-  }
-
-  private schedulePersist(
-    objectiveId: string,
-    tracked: TrackedWorkflow,
-    snapshot: ReturnType<Actor<ConversationMachine>['getSnapshot']>,
-  ): void {
-    if (snapshot.status !== 'active') return;
-
-    // Copie figée au moment de la transition (les dates deviennent des chaînes, comme en base).
-    const state: WorkflowState = JSON.parse(
-      JSON.stringify({
-        id: objectiveId,
-        value: snapshot.value,
-        context: snapshot.context,
-        persistedSnapshot: tracked.actor.getPersistedSnapshot(),
-        updatedAt: new Date().toISOString(),
-      }),
-    );
-
-    tracked.persisting = tracked.persisting
-      .then(() => this.deps.workflowStateRepository.save(state))
-      .catch((error) => this.logger.error(`Failed to persist workflow ${objectiveId}`, error));
-  }
-
-  private async release(objectiveId: string, tracked: TrackedWorkflow): Promise<void> {
-    await tracked.persisting;
-    tracked.subscription?.unsubscribe();
-    tracked.actor.stop();
-    if (this.workflows.get(objectiveId) === tracked) this.workflows.delete(objectiveId);
-  }
-
-  private view(objectiveId: string, tracked: TrackedWorkflow): WorkflowStateView {
-    const snapshot = tracked.actor.getSnapshot();
+  private view(objectiveId: string, instance: AssistantInstance): WorkflowStateView {
+    const snapshot = instance.actor.getSnapshot();
     return toWorkflowStateView(
       objectiveId,
       {
@@ -380,43 +208,5 @@ export class SendMessageToAIWorkflow {
       },
       this.deps.now?.() ?? new Date(),
     );
-  }
-
-  /**
-   * Un abonné en panne ne fait pas échouer le tour : la réponse d'Akari est déjà écrite et la personne
-   * l'a. La panne est journalisée.
-   */
-  private reportTurnSucceeded(
-    onTurnSucceeded: MachineDependencies['onTurnSucceeded'],
-  ): MachineDependencies['onTurnSucceeded'] {
-    if (!onTurnSucceeded) return undefined;
-    return async (turn) => {
-      try {
-        await onTurnSucceeded(turn);
-      } catch (error) {
-        this.logger.error(`Workflow ${turn.objectiveId}: the succeeded turn could not be reported`, error);
-      }
-    };
-  }
-
-  private actorOptions() {
-    return this.options.inspect ? { inspect: this.options.inspect } : {};
-  }
-
-  /** Une file par workflow : chargement, création et libération ne se croisent jamais. */
-  private withLock<T>(key: string, task: () => Promise<T>): Promise<T> {
-    const previous = this.locks.get(key) ?? Promise.resolve();
-    const run = previous.then(task, task);
-    const settled = run.then(
-      () => undefined,
-      () => undefined,
-    );
-
-    this.locks.set(key, settled);
-    void settled.then(() => {
-      if (this.locks.get(key) === settled) this.locks.delete(key);
-    });
-
-    return run;
   }
 }

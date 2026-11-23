@@ -1,7 +1,8 @@
 # ADR 0004 — L'orchestrateur XState vit dans le serveur
 
 - Statut : accepté
-- Date : 2026-10-25
+- Date : 2026-10-25 ; révisé le 2026-11-23 : l'hébergement des acteurs et leur persistance sont
+  passés au runtime des workflows ([ADR 0010](./0010-runtime-des-workflows-et-bus-d-evenements.md))
 
 ## Contexte
 
@@ -13,7 +14,8 @@ Firestore à chaque transition, interrogé chaque seconde par l'écran.
 ## Décision
 
 - La machine et ses ports restent ceux d'Apex (`IChatActor`, `IAIActor`, `IToolExecutor`,
-  `IToolExecutionPolicy`, `IToolRegistry`, `IWorkflowStateRepository`) ; le serveur les assemble.
+  `IToolExecutionPolicy`, `IToolRegistry` ; le stockage des états, `WorkflowStateStore`, est
+  désormais celui du runtime) ; le serveur les assemble.
 - L'API expose l'état sous une forme stable (`docs/api.md`) plutôt que le snapshot XState brut :
   la valeur de la machine (`value`, pour les écrans existants, remplacée par `activity` :
   ADR 0005), l'outil en attente d'accord, le dernier message enregistré, la dernière panne.

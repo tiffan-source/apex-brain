@@ -3,22 +3,25 @@ import { createInMemoryChatInfrastructure } from '@org/chat/testing';
 import { SequentialIdGenerator } from '@org/chore/testing';
 import { ObjectiveInternalService } from '@org/objective';
 import { createInMemoryObjectiveInfrastructure, seedObjective } from '@org/objective/testing';
+import {
+  InMemoryWorkflowStateStore,
+  WorkflowLogger,
+  WorkflowRuntime,
+  WorkflowRuntimeOptions,
+} from '@org/workflow-runtime';
 import { AIService } from '../ai/ai.service';
 import { ChatService } from '../chat/chat.service';
 import { AkariSystemContextProvider } from '../context/system-context.provider';
-import { InMemoryWorkflowStateRepository } from '../persistence/in-memory-workflow-state.repository';
 import { CreateSubObjectiveTool } from '../tools/create-sub-objective.tool';
 import { CreateTaskTool } from '../tools/create-task.tool';
 import { GetObjectiveTreeTool } from '../tools/get-objective-tree.tool';
 import { ToolExecutor } from '../tools/tool-executor';
 import { ToolPolicy } from '../tools/tool-policy';
 import { ToolRegistry } from '../tools/tool-registry';
-import {
-  SendMessageToAIWorkflow,
-  SendMessageToAIWorkflowDependencies,
-  SendMessageToAIWorkflowOptions,
-  WorkflowLogger,
-} from '../workflow/send-message-to-ai.workflow';
+import { WorkflowContext, WorkflowStateValue } from '../model/workflow.model';
+import { aiAssistantWorkflow } from '../workflow/ai-assistant.workflow';
+import { MachineDependencies } from '../workflow/machine';
+import { SendMessageToAIWorkflow } from '../workflow/send-message-to-ai.workflow';
 import { WorkflowStateView, WorkflowStatus } from '../workflow/workflow-state.view';
 
 export const silentLogger: WorkflowLogger & { errors: unknown[] } = {
@@ -33,9 +36,10 @@ export const silentLogger: WorkflowLogger & { errors: unknown[] } = {
 
 /**
  * Un workflow complet branché sur des doublures en mémoire : Alice possède l'objectif `o1`
- * (avec sa conversation), Mallory possède `m1`.
+ * (avec sa conversation), Mallory possède `m1`. Le runtime et le workflow sont construits comme dans
+ * l'API : la définition de l'assistant confiée à un runtime, et les règles d'une requête par-dessus.
  */
-export function createWorkflowHarness(options: SendMessageToAIWorkflowOptions = {}) {
+export function createWorkflowHarness(options: WorkflowRuntimeOptions = {}) {
   const objectives = createInMemoryObjectiveInfrastructure();
   const chat = createInMemoryChatInfrastructure();
   const ai = new ScriptedAIProvider();
@@ -54,9 +58,9 @@ export function createWorkflowHarness(options: SendMessageToAIWorkflowOptions = 
     new CreateSubObjectiveTool(objectiveService),
     new CreateTaskTool(objectiveService),
   ]);
-  const workflowStateRepository = new InMemoryWorkflowStateRepository();
+  const workflowStates = new InMemoryWorkflowStateStore<WorkflowContext, WorkflowStateValue>();
 
-  const deps: SendMessageToAIWorkflowDependencies = {
+  const deps: MachineDependencies = {
     chatService: new ChatService(chat.getConversationsQuery, chat.addMessageCommand),
     aiService: new AIService(ai),
     toolExecutor: new ToolExecutor(toolRegistry),
@@ -64,11 +68,18 @@ export function createWorkflowHarness(options: SendMessageToAIWorkflowOptions = 
     toolRegistry,
     systemContextProvider: new AkariSystemContextProvider(),
     idGenerator: new SequentialIdGenerator('message'),
-    workflowStateRepository,
   };
 
-  const build = (overrides: SendMessageToAIWorkflowOptions = {}) =>
-    new SendMessageToAIWorkflow(deps, { logger: silentLogger, ...options, ...overrides });
+  const build = (overrides: WorkflowRuntimeOptions = {}) => {
+    const runtimeOptions = { logger: silentLogger, ...options, ...overrides };
+    const runtime = new WorkflowRuntime(aiAssistantWorkflow(deps, runtimeOptions.logger), workflowStates, runtimeOptions);
+    return new SendMessageToAIWorkflow({
+      runtime,
+      chatService: deps.chatService,
+      now: deps.now,
+      logger: runtimeOptions.logger,
+    });
+  };
 
   return {
     workflow: build(),
@@ -78,7 +89,7 @@ export function createWorkflowHarness(options: SendMessageToAIWorkflowOptions = 
     ai,
     chat,
     objectives,
-    workflowStateRepository,
+    workflowStates,
   };
 }
 

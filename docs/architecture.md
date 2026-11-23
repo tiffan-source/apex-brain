@@ -24,10 +24,10 @@ l'application NestJS `apps/api`.
 │ libs/user  auth  │  │ libs/objective   │◄─│ workflows/ai-assistant   │
 │ (type:identity)  │  │ chat  ai         │  │ (type:workflow)          │
 │ la personne,     │  │ (type:domain)    │  │ machine XState, outils,  │
-│ ses rôles, la    │  │ ne voit que l'id │  │ acteurs                  │
-│ connexion        │  │ du propriétaire  │  │                          │
+│ ses rôles, la    │  │ ne voit que l'id │  │ acteurs ; hébergé par    │
+│ connexion        │  │ du propriétaire  │  │ workflows/runtime        │
 └──────────────────┘  └──────────────────┘  └──────────────────────────┘
-     ▲                     ▲                        ▲ IWorkflowStateRepository
+     ▲                     ▲                        ▲ WorkflowStateStore
      │ AuthProvider        │ ports du domaine       │
 ┌──────────────────────────────────────────────────────────────────────┐
 │ libs/supabase   libs/gemini   libs/firebase   (type:infra)           │
@@ -44,8 +44,9 @@ l'application NestJS `apps/api`.
 | `type:kernel` | `chore` | rien | SDK d'infrastructure, NestJS |
 | `type:domain` | `objective`, `chat`, `ai` | `type:kernel` | un autre domaine, l'identité, l'infrastructure, NestJS |
 | `type:identity` | `user`, `auth`, `akari-access` | `type:identity`, `type:kernel` | le métier, l'infrastructure, NestJS |
-| `type:workflow` | `ai-assistant` | `type:domain`, `type:kernel` | l'identité, l'infrastructure, NestJS |
-| `type:infra` | `supabase`, `gemini`, `firebase` | `type:domain`, `type:identity`, `type:workflow`, `type:kernel` | — |
+| `type:runtime` | `workflow-runtime` | `type:runtime`, `type:kernel` | le métier, l'identité, l'infrastructure, NestJS |
+| `type:workflow` | `ai-assistant` | `type:domain`, `type:runtime`, `type:kernel` | l'identité, l'infrastructure, NestJS |
+| `type:infra` | `supabase`, `gemini`, `firebase` | `type:domain`, `type:identity`, `type:workflow`, `type:runtime`, `type:kernel` | — |
 | `type:app` | `api` | tout | — |
 
 Le métier ne voit jamais la personne ni ses rôles : il ne reçoit que l'id du propriétaire
@@ -85,7 +86,12 @@ domaine, rien hors du dossier `bff/` ne les lit.
   `onTurnSucceeded` du workflow, qui ne connaît ni rôles ni quotas.
 - **Adaptateurs** : `libs/supabase`, `libs/gemini`, `libs/firebase`.
 - **Workflow de l'assistant** : `workflows/ai-assistant` ([ADR 0004](./adr/0004-orchestrateur.md),
-  [PRD](./features/send-message-to-ai-prd.md)).
+  [PRD](./features/send-message-to-ai-prd.md)) : la machine, ses ports, et les règles d'une requête
+  (`SendMessageToAIWorkflow`). `aiAssistantWorkflow(…)` la confie au runtime.
+- **Runtime des workflows** : `workflows/runtime` ([ADR 0010](./adr/0010-runtime-des-workflows-et-bus-d-evenements.md)).
+  Il héberge les instances d'un workflow, une par clé (l'objectif) : création ou restauration,
+  sauvegarde ordonnée de chaque transition par le port `WorkflowStateStore` (Firestore,
+  `libs/firebase`), éviction des instances au repos, arrêt, oubli.
 - **Racine de composition** : `apps/api/src/adapters/production-adapters.module.ts` (ports →
   adaptateurs) et `apps/api/src/<contexte>/<contexte>.module.ts` (cas d'usage ← ports).
 - **Contrat HTTP** : `apps/api/src/<contexte>/*.schemas.ts` (zod) ; les mêmes schémas valident

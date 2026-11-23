@@ -41,7 +41,8 @@
       "@org/supabase": ["./libs/supabase/src/index.ts"],
       "@org/gemini": ["./libs/gemini/src/index.ts"],
       "@org/firebase": ["./libs/firebase/src/index.ts"],
-      "@org/ai-assistant": ["./workflows/ai-assistant/src/index.ts"]
+      "@org/ai-assistant": ["./workflows/ai-assistant/src/index.ts"],
+      "@org/workflow-runtime": ["./workflows/runtime/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp", "dist"]

@@ -5,7 +5,6 @@ import { InteractiveAIProvider } from '@org/ai';
 import { ScriptedAIProvider } from '@org/ai/testing';
 import { AkariRuleSource, AkariUsageJournal, Clock } from '@org/akari-access';
 import { ControllableClock, InMemoryAkariRuleSource, InMemoryAkariUsageJournal } from '@org/akari-access/testing';
-import { InMemoryWorkflowStateRepository, IWorkflowStateRepository } from '@org/ai-assistant';
 import { AuthProvider } from '@org/auth';
 import { InMemoryAuthProvider } from '@org/auth/testing';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
@@ -16,6 +15,7 @@ import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
 import { createInMemoryObjectiveInfrastructure } from '@org/objective/testing';
 import type { Role } from '@org/user';
+import { InMemoryWorkflowStateStore, WorkflowStateStore } from '@org/workflow-runtime';
 import request from 'supertest';
 import { PORTS } from '../../src/adapters/ports';
 import { AppModule } from '../../src/app.module';
@@ -53,7 +53,7 @@ export async function createTestApp(
   const chat = createInMemoryChatInfrastructure();
   const auth = new InMemoryAuthProvider();
   const ai = new ScriptedAIProvider();
-  const workflowStates = new InMemoryWorkflowStateRepository();
+  const workflowStates = new InMemoryWorkflowStateStore();
   const akariRules = new InMemoryAkariRuleSource();
   const akariJournal = new InMemoryAkariUsageJournal();
   const clock = new ControllableClock();
@@ -77,7 +77,7 @@ export async function createTestApp(
       { provide: GetConversationsQuery, useValue: chat.getConversationsQuery },
       { provide: AddMessageCommand, useValue: chat.addMessageCommand },
       { provide: InteractiveAIProvider, useValue: ai },
-      { provide: IWorkflowStateRepository, useValue: workflowStates },
+      { provide: WorkflowStateStore, useValue: workflowStates },
       { provide: AkariRuleSource, useValue: akariRules },
       { provide: AkariUsageJournal, useValue: akariJournal },
       { provide: Clock, useValue: clock },

@@ -1,4 +1,5 @@
 export * from './lib/workflow/send-message-to-ai.workflow';
+export * from './lib/workflow/ai-assistant.workflow';
 export * from './lib/workflow/workflow-state.view';
 export * from './lib/workflow/actors.protocols';
 export * from './lib/workflow/machine';
@@ -14,4 +15,3 @@ export * from './lib/tools/tool-registry';
 export * from './lib/tools/get-objective-tree.tool';
 export * from './lib/tools/create-sub-objective.tool';
 export * from './lib/tools/create-task.tool';
-export * from './lib/persistence/in-memory-workflow-state.repository';

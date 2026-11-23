@@ -5,7 +5,7 @@ import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { IdGenerator } from '@org/chore';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
-import { IWorkflowStateRepository } from '@org/ai-assistant';
+import { WorkflowStateStore } from '@org/workflow-runtime';
 
 /**
  * Les ports que les modules métier attendent de l'infrastructure. Un module d'adaptateurs (Supabase,
@@ -21,7 +21,7 @@ export const PORTS = [
   GetConversationsQuery,
   AddMessageCommand,
   InteractiveAIProvider,
-  IWorkflowStateRepository,
+  WorkflowStateStore,
   AkariRuleSource,
   AkariUsageJournal,
   Clock,

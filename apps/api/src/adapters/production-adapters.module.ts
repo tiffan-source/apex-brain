@@ -9,11 +9,10 @@ import {
   InMemoryAkariUsageJournal,
   SystemClock,
 } from '@org/akari-access';
-import { IWorkflowStateRepository, InMemoryWorkflowStateRepository } from '@org/ai-assistant';
 import { AuthProvider } from '@org/auth';
 import { AddMessageCommand, GetConversationsQuery } from '@org/chat';
 import { IdGenerator, UuidIdGenerator } from '@org/chore';
-import { FirebaseClientDataAccess, FirebaseWorkflowStateRepository } from '@org/firebase';
+import { FirebaseClientDataAccess, FirebaseWorkflowStateStore } from '@org/firebase';
 import { createGeminiInteractionsClient, GeminiInteractiveAIProvider } from '@org/gemini';
 import { ObjectiveRepository, TaskRepository } from '@org/objective';
 import { GetObjectiveTreeQuery } from '@org/objective/bff';
@@ -26,6 +25,7 @@ import {
   SupabaseObjectiveRepository,
   SupabaseTaskRepository,
 } from '@org/supabase';
+import { InMemoryWorkflowStateStore, WorkflowStateStore } from '@org/workflow-runtime';
 import type { Environment } from '../config/environment';
 import { PORTS } from './ports';
 
@@ -72,11 +72,11 @@ export class ProductionAdaptersModule {
             }),
         },
         {
-          provide: IWorkflowStateRepository,
+          provide: WorkflowStateStore,
           useFactory: () =>
             environment.WORKFLOW_STATE_STORE === 'memory'
-              ? new InMemoryWorkflowStateRepository()
-              : new FirebaseWorkflowStateRepository(
+              ? new InMemoryWorkflowStateStore()
+              : new FirebaseWorkflowStateStore(
                   new FirebaseClientDataAccess({
                     projectId: environment.FIREBASE_PROJECT_ID as string,
                     clientEmail: environment.FIREBASE_CLIENT_EMAIL,
